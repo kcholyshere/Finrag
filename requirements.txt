@@ -5,6 +5,7 @@ google-genai
 faiss-cpu
 qdrant-client
 langchain
+langchain-community
 langchain-text-splitters
 streamlit
 langfuse
