@@ -1,10 +1,11 @@
 """Ingestion pipeline entrypoint: parse the PDF, chunk it, embed the chunks,
-and persist the FAISS index. Run with `python -m src.dataset`.
+and persist both the FAISS and Qdrant indexes. Run with `python -m src.dataset`.
+Requires the Qdrant service to be up (`docker compose up -d qdrant`).
 """
 
 from src.ingestion.chunk import chunk_sections, group_into_sections, save_chunks
 from src.ingestion.parse import extract_text_records, load_or_parse_pdf
-from src.retrieval.faiss_store import build_index, save_index
+from src.retrieval import faiss_store, qdrant_store
 
 
 def run() -> None:
@@ -17,9 +18,12 @@ def run() -> None:
     save_chunks(chunks)
     print(f"{len(sections)} sections -> {len(chunks)} chunks")
 
-    index = build_index(chunks)
-    save_index(index)
+    faiss_index = faiss_store.build_index(chunks)
+    faiss_store.save_index(faiss_index)
     print("FAISS index built and saved")
+
+    qdrant_store.build_index(chunks)
+    print("Qdrant index built and saved")
 
 
 if __name__ == "__main__":

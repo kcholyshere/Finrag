@@ -6,6 +6,7 @@ faiss-cpu
 qdrant-client
 langchain
 langchain-community
+langchain-qdrant
 langchain-text-splitters
 streamlit
 langfuse
