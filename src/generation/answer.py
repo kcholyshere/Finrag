@@ -1,8 +1,10 @@
 from collections.abc import Iterator
 
 from langchain_core.documents import Document
+from langfuse import observe
 
 from src import config
+from src.retrieval.retriever import Backend, retrieve
 from src.services.genai_client import get_client
 
 SYSTEM_PROMPT = (
@@ -22,6 +24,7 @@ def _build_prompt(query: str, context_docs: list[Document]) -> str:
     return f"{SYSTEM_PROMPT}\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
 
 
+@observe(as_type="generation")
 def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
     client = get_client()
     prompt = _build_prompt(query, context_docs)
@@ -32,3 +35,15 @@ def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
 
 def generate_answer(query: str, context_docs: list[Document]) -> str:
     return "".join(stream_answer(query, context_docs))
+
+
+@observe(name="rag_query")
+def answer_query(
+    query: str, backend: Backend = "faiss", k: int = 4
+) -> tuple[list[Document], Iterator[str]]:
+    """Single traced entry point: retrieval and generation nest under one Langfuse trace.
+
+    Returns the retrieved docs (for display) alongside the streaming answer.
+    """
+    context_docs = retrieve(query, backend=backend, k=k)
+    return context_docs, stream_answer(query, context_docs)

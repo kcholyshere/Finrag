@@ -1,7 +1,6 @@
 import streamlit as st
 
-from src.generation.answer import stream_answer
-from src.retrieval.retriever import retrieve
+from src.generation.answer import answer_query
 
 st.set_page_config(page_title="IFC Annual Report 2024 - RAG", page_icon="📊")
 st.title("IFC Annual Report 2024 (Financials) - RAG")
@@ -18,12 +17,12 @@ query = st.text_input(
 
 if query:
     with st.spinner("Retrieving relevant context..."):
-        docs = retrieve(query, backend=backend, k=k)
+        docs, tokens = answer_query(query, backend=backend, k=k)
 
     st.subheader("Answer")
     answer_placeholder = st.empty()
     answer_text = ""
-    for token in stream_answer(query, docs):
+    for token in tokens:
         answer_text += token
         answer_placeholder.markdown(answer_text)
 
