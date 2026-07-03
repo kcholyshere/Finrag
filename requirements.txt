@@ -1,2 +1,10 @@
 ipykernel
 python-dotenv
+docling
+google-genai
+faiss-cpu
+qdrant-client
+langchain
+langchain-text-splitters
+streamlit
+langfuse
