@@ -95,5 +95,9 @@ target/
 # exclude data from source control by default
 # /data/
 
+# Ingestion pipeline outputs - regenerate via `python -m src.dataset`
+data/interim/*.json
+data/processed/*.jsonl
+
 # Agent working docs (requirements notes, decision log) - not for version control
 /agent_docs/
