@@ -33,6 +33,12 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = "ifc_annual_report_2024"
 
+# Evaluation (Phase 2)
+CURATED_EVAL_PATH = PROJECT_ROOT / "references" / "RAG_evaluation_dataset.csv"
+EVAL_DATASET_PATH = PROCESSED_DIR / "eval_dataset.csv"
+EVAL_RUNS_DIR = PROCESSED_DIR / "eval_runs"
+EVAL_DATASET_TARGET_SIZE = 200
+
 # Langfuse
 LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
 LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")

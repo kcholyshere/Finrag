@@ -10,3 +10,6 @@ langchain-qdrant
 langchain-text-splitters
 streamlit
 langfuse
+ragas
+langchain-google-vertexai
+rapidfuzz

@@ -18,8 +18,13 @@ Financial reports mix narrative text, dense tables, and visual charts - a naive 
 
 ### Phased approach
 1. Data parsing: extract text, tables, and images separately, with metadata and cross-referencing where feasible.
-2. Phase 1 - Naive text RAG: chunk text, embed, index in FAISS + Qdrant, retrieve, generate via Gemini, basic Streamlit/Gradio UI, Langfuse tracing.
-3. Later phases (not yet detailed): incorporate tables and images into retrieval, add re-ranking, and formal RAGAS-based evaluation.
+2. Phase 1 - Naive text RAG: chunk text, embed, index in FAISS + Qdrant, retrieve, generate via Gemini, basic Streamlit UI, Langfuse tracing.
+3. Phase 2 - Evaluation (`src/evaluation/`): a 200-row eval set (`data/processed/eval_dataset.csv` - 34 curated rows plus synthetically generated/critique-filtered rows, built by `python -m src.evaluation.synthetic_qa`) evaluated in two layers via `python -m src.evaluation.run_eval`:
+   - Per-step diagnostics (`src/evaluation/diagnostics.py`): parsing/chunking coverage (fuzzy match), retrieval Hit Rate@k/MRR plus RAGAS `context_precision`/`context_recall`, and RAGAS `faithfulness`/`answer_relevancy` for generation.
+   - End-to-end outcome: RAGAS `answer_correctness`, RAGAS's own LLM-graded metrics serving as the LLM-as-judge experiment.
+   - RAGAS runs against Vertex AI Gemini via `src/evaluation/ragas_compat.py` (see ADR-0006 in `agent_docs/decisions.md` for the RAGAS/langchain-community compatibility shim this needs).
+   - Each run is saved as a settings-tagged JSON under `data/processed/eval_runs/` so later phases can be compared against this baseline.
+4. Later phases (not yet detailed): incorporate tables and images into retrieval, add re-ranking.
 
 ## Critical rules
 - Since we add new components progressively, we will progressively update the CLAUDE.md file. New required components are added per each new project phase. 
