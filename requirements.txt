@@ -9,6 +9,7 @@ langchain-community
 langchain-qdrant
 langchain-text-splitters
 rank_bm25
+sentence-transformers
 streamlit
 langfuse
 ragas

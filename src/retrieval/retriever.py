@@ -8,7 +8,7 @@ from langfuse import observe
 from qdrant_client import models as qdrant_models
 
 from src.ingestion.chunk import load_chunks
-from src.retrieval import faiss_store, qdrant_store
+from src.retrieval import faiss_store, qdrant_store, reranker
 
 Backend = Literal["faiss", "qdrant"]
 
@@ -75,3 +75,16 @@ def retrieve_hybrid(
         weights=[dense_weight, 1 - dense_weight],
     )
     return ensemble.invoke(query)
+
+
+@observe(as_type="retriever")
+def retrieve_reranked(
+    query: str,
+    backend: Backend = "faiss",
+    k: int = 4,
+    candidate_k: int = 10,
+    dense_weight: float = 0.5,
+) -> list[Document]:
+    """Cast a wider hybrid net, then use a cross-encoder to re-rank down to top-k."""
+    candidates = retrieve_hybrid(query, backend=backend, k=candidate_k, dense_weight=dense_weight)
+    return reranker.rerank(query, candidates, top_n=k)
