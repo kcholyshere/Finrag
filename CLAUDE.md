@@ -11,7 +11,7 @@ Financial reports mix narrative text, dense tables, and visual charts - a naive 
 - Vector DBs: FAISS and Qdrant (local), populate both, compare performance and use cases.
 - PDF parsing: Docling / PyMuPDF / Gemini multimodal, for text, tables (Camelot/Tabula or LLM-based), and images (Gemini-generated captions).
 - Framework: LangChain for RAG orchestration.
-- UI: Streamlit or Gradio.
+- UI: Streamlit.
 - Observability: Langfuse for tracing queries and responses.
 - Evaluation: RAGAS.
 - Deployment: Docker.
@@ -29,3 +29,5 @@ Financial reports mix narrative text, dense tables, and visual charts - a naive 
 ## Critical rules
 - Since we add new components progressively, we will progressively update the CLAUDE.md file. New required components are added per each new project phase. 
 - Commit and push at reasonable intervals
+- We're currently in a speed push to get through several phases quickly. Balance speed with understanding: keep messages brief, succinct, and directly relevant to the query - don't diverge into tangents or exhaustive option surveys unless asked. Move fast, but don't skip verifying that things actually work.
+- Curate `agent_docs/achievements.md` proactively as we go, using the `resumify` skill, whenever a piece of completed work is genuinely high-impact (a measurable before/after, a non-obvious debugging insight, a real architectural trade-off). Don't wait to be asked, and don't log routine commits or boilerplate.

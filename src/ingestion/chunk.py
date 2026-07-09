@@ -39,7 +39,12 @@ def chunk_sections(sections: list[dict]) -> list[Document]:
     )
     texts = [s["text"] for s in sections]
     metadatas = [
-        {"section": s["section"], "start_page": s["start_page"], "end_page": s["end_page"]}
+        {
+            "section": s["section"],
+            "start_page": s["start_page"],
+            "end_page": s["end_page"],
+            "content_type": "text",
+        }
         for s in sections
     ]
     return splitter.create_documents(texts, metadatas=metadatas)
