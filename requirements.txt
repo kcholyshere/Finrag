@@ -8,6 +8,7 @@ langchain
 langchain-community
 langchain-qdrant
 langchain-text-splitters
+rank_bm25
 streamlit
 langfuse
 ragas
