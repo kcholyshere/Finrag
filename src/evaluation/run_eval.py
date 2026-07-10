@@ -2,7 +2,8 @@
 computes both per-step diagnostics and the end-to-end outcome metric, then saves a
 settings-tagged JSON so later phases can be compared against this baseline.
 
-Run with `python -m src.evaluation.run_eval [--backend faiss|qdrant] [--k 4] [--n N]`.
+Run with `python -m src.evaluation.run_eval [--backend faiss|qdrant] [--k 4] [--n N]
+[--retrieval-mode dense|hybrid|reranked]`.
 Requires the FAISS/Qdrant indexes to already be built (`python -m src.dataset`), and
 `data/processed/eval_dataset.csv` to exist (`python -m src.evaluation.synthetic_qa`).
 """
@@ -18,6 +19,7 @@ import argparse
 import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from typing import Literal
 
 import pandas as pd
 
@@ -26,14 +28,17 @@ from src.evaluation import diagnostics
 from src.evaluation.diagnostics import EvalSample
 from src.generation.answer import generate_answer
 from src.ingestion.chunk import load_chunks
-from src.retrieval.retriever import Backend, retrieve
+from src.retrieval.retriever import Backend, retrieve, retrieve_hybrid, retrieve_reranked
 
 MAX_WORKERS = 6
 
+RetrievalMode = Literal["dense", "hybrid", "reranked"]
+RETRIEVE_FNS = {"dense": retrieve, "hybrid": retrieve_hybrid, "reranked": retrieve_reranked}
 
-def _build_sample(row: pd.Series, backend: Backend, k: int) -> EvalSample:
+
+def _build_sample(row: pd.Series, backend: Backend, k: int, retrieval_mode: RetrievalMode) -> EvalSample:
     question = row["Question"]
-    retrieved_docs = retrieve(question, backend=backend, k=k)
+    retrieved_docs = RETRIEVE_FNS[retrieval_mode](question, backend=backend, k=k)
     generated_answer = generate_answer(question, retrieved_docs)
     return EvalSample(
         question=question,
@@ -46,19 +51,32 @@ def _build_sample(row: pd.Series, backend: Backend, k: int) -> EvalSample:
     )
 
 
-def run_pipeline(eval_df: pd.DataFrame, backend: Backend, k: int) -> list[EvalSample]:
+def run_pipeline(
+    eval_df: pd.DataFrame, backend: Backend, k: int, retrieval_mode: RetrievalMode
+) -> list[EvalSample]:
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(_build_sample, row, backend, k) for _, row in eval_df.iterrows()]
+        futures = [
+            executor.submit(_build_sample, row, backend, k, retrieval_mode)
+            for _, row in eval_df.iterrows()
+        ]
         return [f.result() for f in futures]
 
 
-def run(backend: Backend = "faiss", k: int = 4, n: int | None = None) -> dict:
+def run(
+    backend: Backend = "faiss",
+    k: int = 4,
+    n: int | None = None,
+    retrieval_mode: RetrievalMode = "dense",
+) -> dict:
     eval_df = pd.read_csv(config.EVAL_DATASET_PATH)
     if n is not None:
         eval_df = eval_df.sample(n=n, random_state=0)
 
-    print(f"Running retrieval + generation for {len(eval_df)} questions (backend={backend}, k={k})...")
-    samples = run_pipeline(eval_df, backend, k)
+    print(
+        f"Running retrieval + generation for {len(eval_df)} questions "
+        f"(backend={backend}, k={k}, retrieval_mode={retrieval_mode})..."
+    )
+    samples = run_pipeline(eval_df, backend, k, retrieval_mode)
 
     print("Checking parsing/chunking coverage...")
     chunks = load_chunks()
@@ -75,6 +93,7 @@ def run(backend: Backend = "faiss", k: int = 4, n: int | None = None) -> dict:
         "settings": {
             "backend": backend,
             "k": k,
+            "retrieval_mode": retrieval_mode,
             "n_samples": len(samples),
             "chunk_size": config.CHUNK_SIZE,
             "chunk_overlap": config.CHUNK_OVERLAP,
@@ -101,7 +120,7 @@ def run(backend: Backend = "faiss", k: int = 4, n: int | None = None) -> dict:
 
     config.EVAL_RUNS_DIR.mkdir(parents=True, exist_ok=True)
     timestamp_slug = result["settings"]["timestamp"].replace(":", "-")
-    output_path = config.EVAL_RUNS_DIR / f"{timestamp_slug}_{backend}_k{k}.json"
+    output_path = config.EVAL_RUNS_DIR / f"{timestamp_slug}_{backend}_{retrieval_mode}_k{k}.json"
     with open(output_path, "w") as f:
         json.dump(result, f, indent=2, default=str)
     print(f"Saved run to {output_path}")
@@ -114,6 +133,9 @@ if __name__ == "__main__":
     parser.add_argument("--backend", choices=["faiss", "qdrant"], default="faiss")
     parser.add_argument("--k", type=int, default=4)
     parser.add_argument("--n", type=int, default=None, help="Sample size for a quick smoke test")
+    parser.add_argument(
+        "--retrieval-mode", choices=["dense", "hybrid", "reranked"], default="dense"
+    )
     args = parser.parse_args()
 
-    run(backend=args.backend, k=args.k, n=args.n)
+    run(backend=args.backend, k=args.k, n=args.n, retrieval_mode=args.retrieval_mode)
