@@ -50,6 +50,22 @@ def chunk_sections(sections: list[dict]) -> list[Document]:
     return splitter.create_documents(texts, metadatas=metadatas)
 
 
+def chunk_tables(table_records: list[dict]) -> list[Document]:
+    """One chunk per table - a table is already a coherent unit, no recursive splitting."""
+    return [
+        Document(
+            page_content=record["text"],
+            metadata={
+                "section": record["section"],
+                "start_page": record["page"],
+                "end_page": record["page"],
+                "content_type": "table",
+            },
+        )
+        for record in table_records
+    ]
+
+
 def save_chunks(chunks: list[Document]) -> None:
     CHUNKS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CHUNKS_PATH, "w") as f:
@@ -70,11 +86,19 @@ def load_chunks() -> list[Document]:
 
 
 if __name__ == "__main__":
-    from src.ingestion.parse import extract_text_records, load_or_parse_pdf
+    from src.ingestion.parse import extract_table_records, extract_text_records, load_or_parse_pdf
 
     doc = load_or_parse_pdf()
     records = extract_text_records(doc)
     sections = group_into_sections(records)
-    chunks = chunk_sections(sections)
+    text_chunks = chunk_sections(sections)
+
+    table_records = extract_table_records(doc)
+    table_chunks = chunk_tables(table_records)
+
+    chunks = text_chunks + table_chunks
     save_chunks(chunks)
-    print(f"{len(sections)} sections -> {len(chunks)} chunks, saved to {CHUNKS_PATH}")
+    print(
+        f"{len(sections)} sections -> {len(text_chunks)} text chunks, "
+        f"{len(table_chunks)} table chunks, saved to {CHUNKS_PATH}"
+    )

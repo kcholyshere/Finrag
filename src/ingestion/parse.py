@@ -22,6 +22,39 @@ def load_or_parse_pdf() -> DoclingDocument:
     return parse_pdf()
 
 
+def _build_page_to_section(document: DoclingDocument) -> dict[int, str]:
+    """Map each page number to whichever section header was active on that page."""
+    page_to_section: dict[int, str] = {}
+    current_section = None
+
+    for item in document.texts:
+        if item.label == "section_header":
+            current_section = item.text
+        if item.prov:
+            page_to_section[item.prov[0].page_no] = current_section
+
+    return page_to_section
+
+
+def extract_table_records(document: DoclingDocument) -> list[dict]:
+    """Flatten the parsed document's tables into markdown records with page/section metadata."""
+    page_to_section = _build_page_to_section(document)
+    records = []
+
+    for table in document.tables:
+        page_no = table.prov[0].page_no if table.prov else None
+        records.append(
+            {
+                "text": table.export_to_markdown(document),
+                "caption": table.caption_text(document) or None,
+                "page": page_no,
+                "section": page_to_section.get(page_no),
+            }
+        )
+
+    return records
+
+
 def extract_text_records(document: DoclingDocument) -> list[dict]:
     """Flatten the parsed document into text records with page/section metadata.
 
@@ -50,4 +83,7 @@ def extract_text_records(document: DoclingDocument) -> list[dict]:
 
 if __name__ == "__main__":
     doc = parse_pdf()
-    print(f"Parsed {doc.num_pages()} pages, {len(doc.texts)} text items, saved to {DOCLING_JSON_PATH}")
+    print(
+        f"Parsed {doc.num_pages()} pages, {len(doc.texts)} text items, "
+        f"{len(doc.tables)} tables, saved to {DOCLING_JSON_PATH}"
+    )

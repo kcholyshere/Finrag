@@ -10,14 +10,17 @@ from src.services.genai_client import get_client
 SYSTEM_PROMPT = (
     "You are a financial analyst assistant answering questions about the IFC "
     "Annual Report 2024 (Financials). Answer only using the provided context. "
-    "If the context does not contain the answer, say so plainly. Cite the page "
-    "number(s) you used."
+    "Some context is markdown tables extracted from the report - read the header "
+    "row carefully to match the right column (e.g. fiscal year) to the right row "
+    "before quoting or calculating a figure. If the context does not contain the "
+    "answer, say so plainly. Cite the page number(s) you used."
 )
 
 
 def _build_prompt(query: str, context_docs: list[Document]) -> str:
     context = "\n\n".join(
-        f"[Source: page {d.metadata.get('start_page')}, section '{d.metadata.get('section')}']\n"
+        f"[Source: page {d.metadata.get('start_page')}, section '{d.metadata.get('section')}', "
+        f"type: {d.metadata.get('content_type')}]\n"
         f"{d.page_content}"
         for d in context_docs
     )

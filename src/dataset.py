@@ -11,20 +11,28 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-from src.ingestion.chunk import chunk_sections, group_into_sections, save_chunks
-from src.ingestion.parse import extract_text_records, load_or_parse_pdf
+from src.ingestion.chunk import chunk_sections, chunk_tables, group_into_sections, save_chunks
+from src.ingestion.parse import extract_table_records, extract_text_records, load_or_parse_pdf
 from src.retrieval import faiss_store, qdrant_store
 
 
 def run() -> None:
     document = load_or_parse_pdf()
-    print(f"Parsed {document.num_pages()} pages, {len(document.texts)} text items")
+    print(
+        f"Parsed {document.num_pages()} pages, {len(document.texts)} text items, "
+        f"{len(document.tables)} tables"
+    )
 
     records = extract_text_records(document)
     sections = group_into_sections(records)
-    chunks = chunk_sections(sections)
+    text_chunks = chunk_sections(sections)
+
+    table_records = extract_table_records(document)
+    table_chunks = chunk_tables(table_records)
+
+    chunks = text_chunks + table_chunks
     save_chunks(chunks)
-    print(f"{len(sections)} sections -> {len(chunks)} chunks")
+    print(f"{len(sections)} sections -> {len(text_chunks)} text chunks, {len(table_chunks)} table chunks")
 
     faiss_index = faiss_store.build_index(chunks)
     faiss_store.save_index(faiss_index)
