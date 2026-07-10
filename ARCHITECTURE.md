@@ -205,6 +205,77 @@ flowchart TB
     App -.->|"traces"| LangfuseCloud
 ```
 
+## Evaluation: measuring Phase 1 quality
+
+Phase 2 adds an offline evaluation harness that sits beside ingestion/serving rather than in
+their request path - it runs the *existing* pipeline over a fixed question set and scores it, in
+two layers: per-step diagnostics (is each stage doing its job?) and end-to-end outcome (is the
+final answer any good?). See `agent_docs/decisions.md` (ADR-0006) for why the RAGAS/Vertex shim
+below is necessary.
+
+```mermaid
+flowchart TB
+    Curated["references/RAG_evaluation_dataset.csv<br/>33 hand-curated Q&A pairs"]
+    Synth["synthetic_qa.py<br/>generate + critique-filter<br/>(groundedness/relevance/standalone)"]
+    EvalSet["data/processed/eval_dataset.csv<br/>~200 rows, Source=curated|synthetic"]
+
+    Curated --> EvalSet
+    Chunks2["data/processed/chunks.jsonl"] --> Synth --> EvalSet
+
+    subgraph RunEval["run_eval.py - python -m src.evaluation.run_eval --backend faiss|qdrant"]
+        Retrieve2["retrieval.retrieve()<br/>per question"]
+        Generate2["generation.generate_answer()<br/>per question"]
+        Coverage["diagnostics.parse_chunk_coverage()<br/>rapidfuzz vs live chunks"]
+        RankMetrics["diagnostics.hit_rate_and_mrr()<br/>page-overlap relevance label"]
+        RagasMetrics["diagnostics.run_ragas_metrics()<br/>single evaluate() call"]
+    end
+
+    subgraph RagasCompat["ragas_compat.py"]
+        Shim["langchain_community.chat_models.vertexai<br/>stub module (pre-import)"]
+        LLMWrap["ChatVertexAI → LangchainLLMWrapper"]
+        EmbedWrap["GeminiEmbeddings → LangchainEmbeddingsWrapper"]
+    end
+
+    EvalSet --> Retrieve2 --> Generate2
+    Generate2 --> Coverage
+    Generate2 --> RankMetrics
+    Generate2 --> RagasMetrics
+    RagasMetrics --> RagasCompat
+    RagasCompat -.->|"grades via"| Vertex2["Vertex AI<br/>gemini-3.5-flash"]
+
+    Coverage --> Result["settings-tagged JSON<br/>data/processed/eval_runs/*.json"]
+    RankMetrics --> Result
+    RagasMetrics --> Result
+```
+
+**What each stage checks:**
+
+| Layer | Metric | Question it answers |
+|---|---|---|
+| Parsing/chunking | `parse_chunk_coverage` (rapidfuzz `partial_ratio`, threshold 80) | Does a curated, text-only ground-truth snippet actually survive inside some real chunk? |
+| Retrieval (rank) | Hit Rate@k / MRR@k (ground-truth page as relevance label) | Is the right-page chunk in the top-k, and how high is it ranked? |
+| Retrieval (RAGAS) | `context_precision` / `context_recall` | Are the retrieved contexts sufficient and precise for the reference answer? |
+| Generation (RAGAS) | `faithfulness` / `answer_relevancy` | Is the answer grounded in retrieved context, and does it address the question? |
+| Outcome (RAGAS) | `answer_correctness` | Does the final answer match the reference answer end to end (the LLM-as-judge experiment)? |
+
+**Non-obvious constraints:**
+
+- `ragas_compat.py` must be imported *before* anything else touches `ragas` - ragas 0.4.3
+  unconditionally imports a `langchain_community.chat_models.vertexai.ChatVertexAI` symbol that no
+  longer exists in current `langchain-community`; the shim registers a stub module so that dead
+  import resolves, then wires RAGAS to the real `langchain-google-vertexai` `ChatVertexAI` and to
+  this project's own `GeminiEmbeddings` instead of RAGAS's OpenAI default.
+- `run_ragas_metrics` runs every RAGAS metric in one `evaluate()` call rather than one call per
+  metric: RAGAS tears down its internal asyncio event loop after `evaluate()` returns, and the
+  cached `ChatVertexAI`'s grpc.aio channel is bound to that loop - a second call in the same
+  process silently returns NaN for every row.
+- `parse_chunk_coverage` is scoped to `Source == "curated"` and text-only rows: synthetic rows were
+  generated *from* the same chunks (trivially 100%), and table/image rows can't match since Phase 1
+  only chunks text.
+- Each run is saved as a settings-tagged JSON (backend, k, chunk size/overlap, model IDs,
+  timestamp) so later phases (tables, images, re-ranking) can be compared against this baseline
+  without re-running earlier ones.
+
 ## Key facts worth remembering
 
 - **Auth**: everything goes through Vertex AI Application Default Credentials - no API keys
