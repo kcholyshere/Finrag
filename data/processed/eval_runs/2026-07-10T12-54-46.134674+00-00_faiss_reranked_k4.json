@@ -1,0 +1,87 @@
+{
+  "settings": {
+    "backend": "faiss",
+    "k": 4,
+    "retrieval_mode": "reranked",
+    "n_samples": 200,
+    "chunk_size": 1000,
+    "chunk_overlap": 150,
+    "gemini_model": "gemini-3.5-flash",
+    "embedding_model": "gemini-embedding-001",
+    "timestamp": "2026-07-10T12:54:46.134674+00:00"
+  },
+  "diagnostics": {
+    "parse_chunk_coverage": {
+      "rows_checked": 11,
+      "coverage_rate": 1.0,
+      "mean_fuzzy_score": 97.82177389080988,
+      "misses": []
+    },
+    "retrieval_rank_metrics": {
+      "k": 4,
+      "overall": {
+        "n": 200,
+        "hit_rate": 0.94,
+        "mrr": 0.86
+      },
+      "by_content_type": {
+        "combination": {
+          "n": 2,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "combination (image and text)": {
+          "n": 2,
+          "hit_rate": 0.5,
+          "mrr": 0.5
+        },
+        "combination (table and text)": {
+          "n": 2,
+          "hit_rate": 1.0,
+          "mrr": 0.29166666666666663
+        },
+        "combination (text": {
+          "n": 1,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "image": {
+          "n": 6,
+          "hit_rate": 1.0,
+          "mrr": 0.8055555555555555
+        },
+        "table": {
+          "n": 9,
+          "hit_rate": 0.5555555555555556,
+          "mrr": 0.42592592592592593
+        },
+        "table (multi-page)": {
+          "n": 1,
+          "hit_rate": 1.0,
+          "mrr": 0.3333333333333333
+        },
+        "text": {
+          "n": 176,
+          "hit_rate": 0.9602272727272727,
+          "mrr": 0.8972537878787878
+        },
+        "text (multi-page)": {
+          "n": 1,
+          "hit_rate": 1.0,
+          "mrr": 0.5
+        }
+      }
+    },
+    "retrieval_ragas_metrics": {
+      "context_precision": 0.8810579195514233,
+      "context_recall": 0.882051282051282
+    },
+    "generation_ragas_metrics": {
+      "faithfulness": 0.6793630952380951,
+      "answer_relevancy": 0.8395070468494414
+    }
+  },
+  "outcome": {
+    "answer_correctness": 0.6376604392856323
+  }
+}

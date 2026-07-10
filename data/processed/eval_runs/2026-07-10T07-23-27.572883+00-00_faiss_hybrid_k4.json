@@ -1,0 +1,87 @@
+{
+  "settings": {
+    "backend": "faiss",
+    "k": 4,
+    "retrieval_mode": "hybrid",
+    "n_samples": 200,
+    "chunk_size": 1000,
+    "chunk_overlap": 150,
+    "gemini_model": "gemini-3.5-flash",
+    "embedding_model": "gemini-embedding-001",
+    "timestamp": "2026-07-10T07:23:27.572883+00:00"
+  },
+  "diagnostics": {
+    "parse_chunk_coverage": {
+      "rows_checked": 11,
+      "coverage_rate": 1.0,
+      "mean_fuzzy_score": 97.82177389080988,
+      "misses": []
+    },
+    "retrieval_rank_metrics": {
+      "k": 4,
+      "overall": {
+        "n": 200,
+        "hit_rate": 0.945,
+        "mrr": 0.7858333333333333
+      },
+      "by_content_type": {
+        "combination": {
+          "n": 2,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "combination (image and text)": {
+          "n": 2,
+          "hit_rate": 0.5,
+          "mrr": 0.25
+        },
+        "combination (table and text)": {
+          "n": 2,
+          "hit_rate": 1.0,
+          "mrr": 0.41666666666666663
+        },
+        "combination (text": {
+          "n": 1,
+          "hit_rate": 1.0,
+          "mrr": 1.0
+        },
+        "image": {
+          "n": 6,
+          "hit_rate": 0.8333333333333334,
+          "mrr": 0.75
+        },
+        "table": {
+          "n": 9,
+          "hit_rate": 0.6666666666666666,
+          "mrr": 0.42592592592592593
+        },
+        "table (multi-page)": {
+          "n": 1,
+          "hit_rate": 1.0,
+          "mrr": 0.3333333333333333
+        },
+        "text": {
+          "n": 176,
+          "hit_rate": 0.9659090909090909,
+          "mrr": 0.8172348484848485
+        },
+        "text (multi-page)": {
+          "n": 1,
+          "hit_rate": 1.0,
+          "mrr": 0.3333333333333333
+        }
+      }
+    },
+    "retrieval_ragas_metrics": {
+      "context_precision": 0.7636916933900099,
+      "context_recall": 0.9140625
+    },
+    "generation_ragas_metrics": {
+      "faithfulness": 0.6592176295221982,
+      "answer_relevancy": 0.8271923178044617
+    }
+  },
+  "outcome": {
+    "answer_correctness": 0.6382950929002347
+  }
+}
