@@ -101,3 +101,4 @@ data/processed/*.jsonl
 
 # Agent working docs (requirements notes, decision log) - not for version control
 /agent_docs/
+/references/notes.md
