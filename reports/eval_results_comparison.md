@@ -46,3 +46,29 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 | +Tables | 0.667 | 0.509 |
 
 Table Hit Rate never got past 0.667 even after tables were actually indexed - no better than the +Hybrid stage which had no table chunks at all. MRR did climb steadily. Reranking alone regressed Hit Rate for tables specifically (0.667 -> 0.556) even though it helped every other category - consistent with reranking only reordering a candidate pool that dense+BM25 assembled, and that pool apparently wasn't reliably including the right table chunk pre-Phase-5.1 anyway. Worth digging into before Phase 5.2 (images): possibly dense/BM25 aren't matching table markdown content well, or n=9 is too small to trust as a real signal either way.
+
+## Faithfulness experiments
+
+Baseline faithfulness (0.6800, +Tables row above) barely moved across the whole retrieval ladder, so three isolated generation-side changes were tested in parallel, each on its own git worktree/branch off current main, one change each, run against the same `reranked` pipeline:
+
+| Metric | Baseline (+Tables) | +Grounding instructions | +Lower temperature (0.1) | +Post-hoc verification |
+|---|---|---|---|---|
+| faithfulness | 0.6800 | 0.6364 | 0.6714 | 0.6729 |
+| answer_correctness | 0.6501 | 0.6319 | 0.6452 | 0.6501 |
+| answer_relevancy | 0.8301 | 0.8424 | 0.8506 | 0.8512 |
+| MRR@4 | 0.8153 | 0.8621 | 0.8621 | 0.8621 |
+| context_precision | 0.7590 | 0.8784 | 0.8765 | 0.8815 |
+| context_recall | 0.9219 | 0.8950 | 0.8950 | 0.8990 |
+| Hit Rate@4 | 0.945 | 0.940 | 0.940 | 0.940 |
+
+Branches: `experiment/grounding-prompt` (`efd4cf2`), `experiment/low-temperature` (`e782370`), `experiment/post-hoc-verify` (`69f5201`) - none merged to main yet, pending a decision below.
+
+Retrieval-side caveat: MRR@4/context_precision/context_recall/Hit Rate are identical across all three experiments (as expected - none of them touch retrieval code) but differ from the +Tables row above, because the FAISS index was rebuilt in between (the additive-ladder work reverted and rebuilt it to isolate the +Reranking stage). FAISS's HNSW graph build isn't seeded deterministically, so rebuilding from identical embeddings can still shift a few borderline rankings. This means the three experiment columns are cleanly comparable to *each other*, but their diff against the +Tables column carries a small amount of index-rebuild noise on top of the real generation-side effect.
+
+None of the three improved faithfulness over baseline - all three came in lower:
+
+- Grounding instructions performed worst (-0.044 faithfulness, -0.018 correctness) - explicit "don't infer, cite claim-by-claim" instructions didn't make the model more grounded, if anything the opposite.
+- Lower temperature (-0.009 faithfulness, -0.005 correctness) - close to a wash, small regression.
+- Post-hoc verification (-0.007 faithfulness, correctness flat at 0.6501) - best of the three, essentially a wash on correctness, still a small faithfulness dip. Costs ~2x generation latency for a result indistinguishable from doing nothing, given the index-rebuild noise band above.
+
+Take-away: none of these three are worth merging as-is. The faithfulness ceiling here likely isn't a prompt-wording or decoding-temperature problem - post-hoc verification (the most direct lever, a dedicated grounding-check pass) still didn't move it, which suggests either RAGAS's faithfulness judge is noisy at this sample size, or the ungrounded claims are concentrated in a subset of questions (e.g. table/multi-hop) that these generic fixes don't target. Worth checking per-category faithfulness (not just the blended score) before trying another variant.
