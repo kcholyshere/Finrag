@@ -23,3 +23,9 @@ The first benchmarks above used LangChain's default `IndexFlatL2` - exact, brute
 ## FAISS metadata filtering is a post-filter, Qdrant's is a pre-filter
 
 Found while demonstrating Phase 3 metadata filtering: LangChain's FAISS `similarity_search(filter=...)` only re-filters the top `fetch_k` nearest neighbours by raw vector similarity (default 20) - if the correctly-tagged chunk isn't already in that small window, the filter silently returns nothing, even though a match exists elsewhere in the index. Qdrant filters at the database level against the whole collection, so it doesn't have this problem. Fixed by passing `fetch_k=index.index.ntotal` so FAISS considers the whole corpus before filtering (`src/retrieval/retriever.py`) - fine at this corpus size (673 vectors), but another point in Qdrant's favour at larger scale.
+
+## Metadata filtering demo questions
+
+Question: What framework was used to evaluate IFC's internal control over financial reporting as of June 30, 2024? GT answer: The Internal Control - Integrated Framework (2013) issued by the Committee of Sponsoring Organizations of the Treadway Commission (COSO). Page: 60. Unfiltered retrieval misses (returns pages 58, 53, 61, 53), filtering to start_page 60 hits it.
+
+Question: How many local currencies has IFC provided funding in as of the 2024 report? GT answer: 74. Page: 10; 12. Unfiltered retrieval misses (returns pages 17, 36, 25), filtering to start_page 10 hits it.
