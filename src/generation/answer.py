@@ -19,8 +19,8 @@ SYSTEM_PROMPT = (
 
 def _build_prompt(query: str, context_docs: list[Document]) -> str:
     context = "\n\n".join(
-        f"[Source: page {d.metadata.get('start_page')}, section '{d.metadata.get('section')}', "
-        f"type: {d.metadata.get('content_type')}]\n"
+        f"[Source: page {config.display_page(d.metadata.get('start_page'))}, "
+        f"section '{d.metadata.get('section')}', type: {d.metadata.get('content_type')}]\n"
         f"{d.page_content}"
         for d in context_docs
     )

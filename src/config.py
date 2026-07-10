@@ -19,6 +19,19 @@ EMBEDDING_DIMENSIONS = 3072
 # Source document
 PDF_PATH = PROJECT_ROOT / "references" / "ifc-annual-report-2024-financials.pdf"
 
+# Docling's raw page index runs 1 ahead of the report's own printed page number
+# throughout (one unnumbered cover page precedes printed page 1) - verified
+# against all 145 page-footer items, zero exceptions. Chunk metadata
+# (start_page/end_page) keeps Docling's raw numbering unchanged, since
+# retrieval filtering and the eval ground truth are already built against it;
+# this offset is applied only where a page number is shown to a person.
+PDF_PAGE_NUMBER_OFFSET = 1
+
+
+def display_page(raw_page_no: int | None) -> int | None:
+    """Convert Docling's raw page index to the report's own printed page number."""
+    return raw_page_no - PDF_PAGE_NUMBER_OFFSET if raw_page_no is not None else None
+
 # Ingestion pipeline data
 INTERIM_DIR = PROJECT_ROOT / "data" / "interim"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
