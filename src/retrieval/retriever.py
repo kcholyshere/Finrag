@@ -53,7 +53,12 @@ def retrieve(
         return index.similarity_search(query, k=k)
 
     if backend == "faiss":
-        return index.similarity_search(query, k=k, filter=metadata_filter)
+        # FAISS's filter is a post-filter over the top fetch_k nearest neighbours
+        # (default 20), not a true pre-filter - fetch_k must cover the whole index
+        # or a filtered match outside that window is silently dropped.
+        return index.similarity_search(
+            query, k=k, filter=metadata_filter, fetch_k=index.index.ntotal
+        )
     return index.similarity_search(query, k=k, filter=_to_qdrant_filter(metadata_filter))
 
 
