@@ -78,4 +78,22 @@ None of the three improved faithfulness over baseline - all three came in lower:
 - Lower temperature (-0.009 faithfulness, -0.005 correctness) - close to a wash, small regression.
 - Post-hoc verification (-0.007 faithfulness, correctness flat at 0.6501) - best of the three, essentially a wash on correctness, still a small faithfulness dip. Costs ~2x generation latency for a result indistinguishable from doing nothing, given the index-rebuild noise band above.
 
-Take-away: none of these three are worth merging as-is. The faithfulness ceiling here likely isn't a prompt-wording or decoding-temperature problem - post-hoc verification (the most direct lever, a dedicated grounding-check pass) still didn't move it, which suggests either RAGAS's faithfulness judge is noisy at this sample size, or the ungrounded claims are concentrated in a subset of questions (e.g. table/multi-hop) that these generic fixes don't target. Worth checking per-category faithfulness (not just the blended score) before trying another variant.
+Take-away: none of these three are worth merging as-is.
+
+### Round 2 (re-run on top of +Table retrievability fixes, 2026-07-13)
+
+The same experiments were re-run as fresh branches off current main (`experiment/grounding-prompt-r2`, `experiment/post-hoc-verify-r2`, `experiment/low-temperature-r2`), each in its own worktree with a byte-copy of the current FAISS index - so unlike round 1, retrieval metrics are exactly identical to the baseline column (Hit Rate@4 0.930, MRR@4 0.8604, no index-rebuild noise). Note the baseline itself changed generation-side since round 1: temperature is now 0.2 (was the 1.0 default) and the prompt gained table/calculator instructions.
+
+| Metric | Baseline (+Table retr. fixes) | +Grounding instructions (r2) | +Post-hoc verification (r2) |
+|---|---|---|---|
+| faithfulness | 0.6917 | 0.7015 | 0.7003 |
+| answer_correctness | 0.6945 | 0.6907 | 0.6946 |
+| answer_relevancy | 0.8598 | 0.8604 | 0.8604 |
+| context_precision | 0.8668 | 0.8719 | 0.8694 |
+| context_recall | 0.9100 | 0.9091 | 0.9091 |
+
+Source files: `data/processed/eval_runs/2026-07-13T18-49-44.847663+00-00_faiss_reranked_k4.json` (grounding), `data/processed/eval_runs/2026-07-13T18-28-28.282793+00-00_faiss_reranked_k4.json` (post-hoc).
+
+The low-temperature re-run was deliberately cancelled mid-flight: with the baseline already at temperature 0.2, it would have measured 0.1 vs 0.2 - a far smaller delta than round 1's 0.1 vs 1.0, with no realistic chance of a decision-changing result.
+
+Round-2 take-away: the conclusion stands - neither variant is worth merging (both within roughly +-0.01 of baseline on faithfulness and correctness). The genuinely useful datum is that grounding instructions flipped from round 1's worst performer (-0.044 faithfulness) to a small positive (+0.010) with nothing but baseline changes in between, which puts round 1's scariest number squarely inside the noise band of RAGAS faithfulness at n=200. Single-run deltas of this size should not drive merge decisions on their own. The faithfulness ceiling here likely isn't a prompt-wording or decoding-temperature problem - post-hoc verification (the most direct lever, a dedicated grounding-check pass) still didn't move it, which suggests either RAGAS's faithfulness judge is noisy at this sample size, or the ungrounded claims are concentrated in a subset of questions (e.g. table/multi-hop) that these generic fixes don't target. Worth checking per-category faithfulness (not just the blended score) before trying another variant.
