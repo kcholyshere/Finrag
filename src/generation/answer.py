@@ -1,9 +1,11 @@
 from collections.abc import Iterator
 
+from google.genai import types
 from langchain_core.documents import Document
 from langfuse import observe
 
 from src import config
+from src.generation.calculator import calculate
 from src.retrieval.retriever import Backend, retrieve
 from src.services.genai_client import get_client
 
@@ -12,9 +14,31 @@ SYSTEM_PROMPT = (
     "Annual Report 2024 (Financials). Answer only using the provided context. "
     "Some context is markdown tables extracted from the report - read the header "
     "row carefully to match the right column (e.g. fiscal year) to the right row "
-    "before quoting or calculating a figure. If the context does not contain the "
-    "answer, say so plainly. Cite the page number(s) you used."
+    "before quoting or calculating a figure. When a question needs arithmetic "
+    "(differences, percentage changes, ratios), call the calculate tool with the "
+    "figures from the context rather than computing mentally. If the context does "
+    "not contain the answer, say so plainly. Cite the page number(s) you used."
 )
+
+# The SDK auto-generates the function declaration from the callable, but its
+# automatic function calling is disabled here because it silently returns an
+# empty stream with generate_content_stream (google-genai 2.10.0) - so
+# stream_answer runs the execute-and-feed-back loop itself instead.
+GENERATION_CONFIG = types.GenerateContentConfig(
+    tools=[calculate],
+    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+)
+
+# One round covers a multi-step expression; a few spares let the model recover
+# from a malformed expression without ever looping forever.
+MAX_TOOL_TURNS = 4
+
+
+def _run_calculate(args: dict) -> dict:
+    try:
+        return {"result": calculate(**args)}
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError) as exc:
+        return {"error": str(exc)}
 
 
 def _build_prompt(query: str, context_docs: list[Document]) -> str:
@@ -30,10 +54,41 @@ def _build_prompt(query: str, context_docs: list[Document]) -> str:
 @observe(as_type="generation")
 def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
     client = get_client()
-    prompt = _build_prompt(query, context_docs)
-    for chunk in client.models.generate_content_stream(model=config.GEMINI_MODEL, contents=prompt):
-        if chunk.text:
-            yield chunk.text
+    contents: list = [_build_prompt(query, context_docs)]
+
+    for _ in range(MAX_TOOL_TURNS):
+        function_calls = []
+        model_parts = []
+        for chunk in client.models.generate_content_stream(
+            model=config.GEMINI_MODEL, contents=contents, config=GENERATION_CONFIG
+        ):
+            if chunk.function_calls:
+                function_calls.extend(chunk.function_calls)
+            if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
+                for part in chunk.candidates[0].content.parts:
+                    model_parts.append(part)
+                    # Thought parts are internal reasoning - keep them in the
+                    # history (their signatures are required) but never show them.
+                    if part.text and not part.thought:
+                        yield part.text
+
+        if not function_calls:
+            return
+
+        # Echo the model's own parts back verbatim - Gemini 3.5 rejects the next
+        # turn if the function_call parts lose their thought_signature.
+        contents.append(types.Content(role="model", parts=model_parts))
+        contents.append(
+            types.Content(
+                role="user",
+                parts=[
+                    types.Part.from_function_response(
+                        name=fc.name, response=_run_calculate(dict(fc.args))
+                    )
+                    for fc in function_calls
+                ],
+            )
+        )
 
 
 def generate_answer(query: str, context_docs: list[Document]) -> str:
