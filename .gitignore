@@ -99,6 +99,9 @@ target/
 data/interim/*.json
 data/processed/*.jsonl
 
+# Eval run outputs - regenerate via `python -m src.evaluation.run_eval`
+data/processed/eval_runs/
+
 # Agent working docs (requirements notes, decision log) - not for version control
 /agent_docs/
 /references/notes.md
