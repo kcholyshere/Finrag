@@ -12,6 +12,7 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
 from src.ingestion.chunk import chunk_sections, chunk_tables, group_into_sections, save_chunks
+from src.ingestion.enrich import summarise_tables
 from src.ingestion.parse import extract_table_records, extract_text_records, load_or_parse_pdf
 from src.retrieval import faiss_store, qdrant_store
 
@@ -27,7 +28,7 @@ def run() -> None:
     sections = group_into_sections(records)
     text_chunks = chunk_sections(sections)
 
-    table_records = extract_table_records(document)
+    table_records = summarise_tables(extract_table_records(document))
     table_chunks = chunk_tables(table_records)
 
     chunks = text_chunks + table_chunks

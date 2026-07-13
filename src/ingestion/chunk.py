@@ -50,11 +50,27 @@ def chunk_sections(sections: list[dict]) -> list[Document]:
     return splitter.create_documents(texts, metadatas=metadatas)
 
 
+def _table_page_content(record: dict) -> str:
+    """Prefix the raw table markdown with question-shaped text for retrieval.
+
+    Bare markdown tables match queries poorly in both dense and BM25 search, so
+    the caption/section header and LLM summary (see enrich.py) go into the
+    embedded text itself - mirroring how text chunks carry their section header
+    inline. The raw table stays below for generation; the UI splits the two
+    apart again by filtering on pipe-prefixed lines.
+    """
+    heading = record.get("caption") or record.get("section")
+    parts = [f"Table: {heading}" if heading else "Table"]
+    if record.get("summary"):
+        parts.append(record["summary"])
+    return "\n".join(parts) + "\n\n" + record["text"]
+
+
 def chunk_tables(table_records: list[dict]) -> list[Document]:
     """One chunk per table - a table is already a coherent unit, no recursive splitting."""
     return [
         Document(
-            page_content=record["text"],
+            page_content=_table_page_content(record),
             metadata={
                 "section": record["section"],
                 "start_page": record["page"],
@@ -86,6 +102,7 @@ def load_chunks() -> list[Document]:
 
 
 if __name__ == "__main__":
+    from src.ingestion.enrich import summarise_tables
     from src.ingestion.parse import extract_table_records, extract_text_records, load_or_parse_pdf
 
     doc = load_or_parse_pdf()
@@ -93,7 +110,7 @@ if __name__ == "__main__":
     sections = group_into_sections(records)
     text_chunks = chunk_sections(sections)
 
-    table_records = extract_table_records(doc)
+    table_records = summarise_tables(extract_table_records(doc))
     table_chunks = chunk_tables(table_records)
 
     chunks = text_chunks + table_chunks

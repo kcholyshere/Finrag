@@ -71,6 +71,16 @@ if query:
             if doc.metadata.get("content_type") == "table":
                 df = _markdown_table_to_df(doc.page_content)
             if df is not None:
+                # Table chunks carry a "Table: <caption>" heading and LLM summary
+                # above the markdown table (retrieval enrichment) - show that
+                # preamble as a caption rather than losing it to the dataframe.
+                preamble = "\n".join(
+                    line
+                    for line in doc.page_content.splitlines()
+                    if not line.strip().startswith("|")
+                ).strip()
+                if preamble:
+                    st.caption(preamble)
                 st.dataframe(df, use_container_width=True)
             else:
                 st.write(doc.page_content)
