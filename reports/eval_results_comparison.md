@@ -4,21 +4,24 @@ FAISS backend only, same 200-row eval set, `k=4`. Each column adds exactly one c
 
 > Maintenance rule: every time the eval benchmark is run, add the result to the table below and update the diff/notes for that stage - don't let this doc drift out of sync with `data/processed/eval_runs/`.
 
-| Metric | Baseline (dense) | +Hybrid (BM25) | +Reranking (cross-encoder) | +Tables (Phase 5.1) |
-|---|---|---|---|---|
-| Hit Rate@4 | 0.860 | 0.945 | 0.940 | 0.945 |
-| MRR@4 | 0.7125 | 0.7858 | 0.8600 | 0.8153 |
-| context_precision | 0.7195 | 0.7637 | 0.8811 | 0.7590 |
-| context_recall | 0.8015 | 0.9141 | 0.8821 | 0.9219 |
-| faithfulness | 0.6571 | 0.6592 | 0.6794 | 0.6800 |
-| answer_relevancy | 0.7746 | 0.8272 | 0.8395 | 0.8301 |
-| answer_correctness | 0.5963 | 0.6383 | 0.6377 | 0.6501 |
+| Metric | Baseline (dense) | +Hybrid (BM25) | +Reranking (cross-encoder) | +Tables (Phase 5.1) | +Table retrievability fixes |
+|---|---|---|---|---|---|
+| Hit Rate@4 | 0.860 | 0.945 | 0.940 | 0.945 | 0.930 |
+| MRR@4 | 0.7125 | 0.7858 | 0.8600 | 0.8153 | 0.8604 |
+| context_precision | 0.7195 | 0.7637 | 0.8811 | 0.7590 | 0.8668 |
+| context_recall | 0.8015 | 0.9141 | 0.8821 | 0.9219 | 0.9100 |
+| faithfulness | 0.6571 | 0.6592 | 0.6794 | 0.6800 | 0.6917 |
+| answer_relevancy | 0.7746 | 0.8272 | 0.8395 | 0.8301 | 0.8598 |
+| answer_correctness | 0.5963 | 0.6383 | 0.6377 | 0.6501 | 0.6945 |
 
 Source files:
 - Baseline: `data/processed/eval_runs/2026-07-10T07-04-26.367728+00-00_faiss_dense_k4.json`
 - +Hybrid: `data/processed/eval_runs/2026-07-10T07-23-27.572883+00-00_faiss_hybrid_k4.json`
 - +Reranking: `data/processed/eval_runs/2026-07-10T12-54-46.134674+00-00_faiss_reranked_k4.json` - reverted `parse.py`/`chunk.py`/`dataset.py` to pre-table commit `028db64~1` to keep the index text-only for this stage, then restored current code and rebuilt the table-inclusive index afterward.
 - +Tables: `data/processed/eval_runs/2026-07-10T10-35-40.149738+00-00_faiss_reranked_k4.json` (hybrid + reranking + table-inclusive index, all together)
+- +Table retrievability fixes: `data/processed/eval_runs/2026-07-13T17-17-40.291555+00-00_faiss_reranked_k4.json`
+
+Unlike earlier stages, the "+Table retrievability fixes" column bundles several changes shipped together on 2026-07-13 (see ADR-0007 and commits `036e7a8`..`48c66fa`): table chunks enriched with inline heading + cached Gemini summary, cross-encoder scoring tables by their heading/summary preamble, BM25 tokenisation fixed (lowercased word tokens instead of bare `str.split()`), "table N" queries injecting section-matched chunks into the reranker pool, calculator function calling, and generation temperature 0.2 (was default 1.0).
 
 Caveat: the +Reranking run uses the current (table-aware) generation prompt wording in `answer.py`, not the pre-table prompt - negligible effect since no table chunks exist yet at that stage to trigger the table-specific instructions.
 
@@ -33,6 +36,7 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 - Baseline -> +Hybrid: everything moved up, nothing regressed. context_recall jumped most (+0.113). answer_correctness +0.042. faithfulness barely moved (+0.002) - better material, not more honesty.
 - +Hybrid -> +Reranking: MRR +0.074 (biggest single-stage MRR jump) and context_precision +0.117, but Hit Rate@4 dipped slightly (-0.005) and answer_correctness is flat (+0.0 vs -0.0006, noise). Reranking's job is ordering, not recall - it can't find chunks hybrid didn't retrieve into the candidate pool, it can only push the right one higher once it's there. That's exactly what the numbers show: big precision/ranking gains, no real recall or end-to-end movement.
 - +Reranking -> +Tables: Hit Rate@4 +0.005, context_recall +0.040, answer_correctness +0.012. Modest, as expected given only 9 of 200 questions are table-typed - see below for why the table-specific numbers matter more than the blended ones here.
+- +Tables -> +Table retrievability fixes: answer_correctness +0.044 - the largest single-stage end-to-end gain on the whole ladder, beating even Baseline -> +Hybrid (+0.042). MRR@4 +0.045 (0.8604, best of any stage), context_precision +0.108, faithfulness +0.012 (also a ladder best), answer_relevancy +0.030. Hit Rate@4 dipped -0.015 and context_recall -0.012; some of that sits within the documented index-rebuild noise band (the FAISS HNSW build is not seeded deterministically), and the rest is consistent with the reranking trade-off seen before: sharper ordering (precision/MRR up) at the cost of a few borderline candidates dropping out of the top 4. The end-to-end outcome moving +0.044 while Hit Rate dipped says the chunks that ranked higher were the ones that actually mattered for answers.
 
 ## Still weak
 
@@ -44,8 +48,11 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 | +Hybrid | 0.667 | 0.426 |
 | +Reranking (no tables) | 0.556 | 0.426 |
 | +Tables | 0.667 | 0.509 |
+| +Table retrievability fixes | 0.667 | 0.667 |
 
-Table Hit Rate never got past 0.667 even after tables were actually indexed - no better than the +Hybrid stage which had no table chunks at all. MRR did climb steadily. Reranking alone regressed Hit Rate for tables specifically (0.667 -> 0.556) even though it helped every other category - consistent with reranking only reordering a candidate pool that dense+BM25 assembled, and that pool apparently wasn't reliably including the right table chunk pre-Phase-5.1 anyway. Worth digging into before Phase 5.2 (images): possibly dense/BM25 aren't matching table markdown content well, or n=9 is too small to trust as a real signal either way.
+Table Hit Rate never got past 0.667 even after tables were actually indexed - no better than the +Hybrid stage which had no table chunks at all. MRR did climb steadily. Reranking alone regressed Hit Rate for tables specifically (0.667 -> 0.556) even though it helped every other category - consistent with reranking only reordering a candidate pool that dense+BM25 assembled, and that pool apparently wasn't reliably including the right table chunk pre-Phase-5.1 anyway.
+
+The 2026-07-13 investigation (ADR-0007) explained the 0.667 ceiling. Root cause: table chunks embedded only bare pipe markdown - the caption/section lived in metadata, which is never embedded - so question-shaped queries could not match tables (the misses never entered the reranker candidate pool). Enriching table chunks with an inline heading + LLM summary and scoring them in the cross-encoder by that preamble took table MRR@4 from 0.509 to 0.667, with every retrieved table hit landing at rank 1 (MRR = Hit Rate means exactly that). The 3 remaining page-label misses split into: 2 metric artefacts (the answers appear verbatim in narrative text elsewhere in the report, which is retrieved and produces correct end-to-end answers - the page-based label just does not credit the alternative source), and 1 genuinely hard case ("total value of assets" is lexically closer to the report's many "fair value of assets" chunks than to the balance sheet).
 
 ## Faithfulness experiments
 
