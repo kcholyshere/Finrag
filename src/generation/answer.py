@@ -1,12 +1,12 @@
 from collections.abc import Iterator
 
-from google.genai import types
+from google.genai import errors, types
 from langchain_core.documents import Document
 from langfuse import observe
 
 from src import config
 from src.generation.calculator import calculate
-from src.retrieval.retriever import Backend, retrieve
+from src.retrieval.retriever import Backend, retrieve_reranked
 from src.services.genai_client import get_client
 
 SYSTEM_PROMPT = (
@@ -51,6 +51,25 @@ def _build_prompt(query: str, context_docs: list[Document]) -> str:
     return f"{SYSTEM_PROMPT}\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
 
 
+def _stream_turn(client, contents: list) -> Iterator:
+    """Yield chunks for one model turn, retrying once if the endpoint fails with
+    a 5xx before any chunk arrives. Mid-stream failures re-raise instead -
+    retrying those would replay tokens the user has already seen.
+    """
+    for attempts_left in (1, 0):
+        received = False
+        try:
+            for chunk in client.models.generate_content_stream(
+                model=config.GEMINI_MODEL, contents=contents, config=GENERATION_CONFIG
+            ):
+                received = True
+                yield chunk
+            return
+        except errors.ServerError:
+            if received or not attempts_left:
+                raise
+
+
 @observe(as_type="generation")
 def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
     client = get_client()
@@ -59,9 +78,7 @@ def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
     for _ in range(MAX_TOOL_TURNS):
         function_calls = []
         model_parts = []
-        for chunk in client.models.generate_content_stream(
-            model=config.GEMINI_MODEL, contents=contents, config=GENERATION_CONFIG
-        ):
+        for chunk in _stream_turn(client, contents):
             if chunk.function_calls:
                 function_calls.extend(chunk.function_calls)
             if chunk.candidates and chunk.candidates[0].content and chunk.candidates[0].content.parts:
@@ -102,6 +119,8 @@ def answer_query(
     """Single traced entry point: retrieval and generation nest under one Langfuse trace.
 
     Returns the retrieved docs (for display) alongside the streaming answer.
+    Uses the strongest retrieval pipeline (hybrid + cross-encoder reranking) -
+    plain dense retrieve() remains available for comparisons and evaluation.
     """
-    context_docs = retrieve(query, backend=backend, k=k)
+    context_docs = retrieve_reranked(query, backend=backend, k=k)
     return context_docs, stream_answer(query, context_docs)

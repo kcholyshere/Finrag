@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from google.genai import errors as genai_errors
 
 from src import config
 from src.generation.answer import answer_query
@@ -57,15 +58,24 @@ query = st.text_input(
 )
 
 if query:
-    with st.spinner("Retrieving relevant context..."):
-        docs, tokens = answer_query(query, backend=backend, k=k)
+    # Vertex AI occasionally returns transient 5xx errors; without this guard
+    # Streamlit renders the raw traceback, which reads as an app crash.
+    try:
+        with st.spinner("Retrieving relevant context..."):
+            docs, tokens = answer_query(query, backend=backend, k=k)
 
-    st.subheader("Answer")
-    answer_placeholder = st.empty()
-    answer_text = ""
-    for token in tokens:
-        answer_text += token
-        answer_placeholder.markdown(answer_text)
+        st.subheader("Answer")
+        answer_placeholder = st.empty()
+        answer_text = ""
+        for token in tokens:
+            answer_text += token
+            answer_placeholder.markdown(answer_text)
+    except genai_errors.APIError as exc:
+        st.error(
+            f"The model endpoint returned an error (HTTP {exc.code}). "
+            "This is usually transient - please try the question again."
+        )
+        st.stop()
 
     st.subheader("Retrieved source snippets")
     for i, doc in enumerate(docs, start=1):
