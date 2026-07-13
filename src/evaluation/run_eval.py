@@ -17,6 +17,7 @@ os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 
 import argparse
 import json
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Literal
@@ -32,14 +33,26 @@ from src.retrieval.retriever import Backend, retrieve, retrieve_hybrid, retrieve
 
 MAX_WORKERS = 6
 
+# A 200-question run makes ~1,000 API calls over half an hour - the odd network
+# blip is expected, and one lost sample shouldn't cost the whole run.
+SAMPLE_ATTEMPTS = 3
+
 RetrievalMode = Literal["dense", "hybrid", "reranked"]
 RETRIEVE_FNS = {"dense": retrieve, "hybrid": retrieve_hybrid, "reranked": retrieve_reranked}
 
 
 def _build_sample(row: pd.Series, backend: Backend, k: int, retrieval_mode: RetrievalMode) -> EvalSample:
     question = row["Question"]
-    retrieved_docs = RETRIEVE_FNS[retrieval_mode](question, backend=backend, k=k)
-    generated_answer = generate_answer(question, retrieved_docs)
+    for attempt in range(1, SAMPLE_ATTEMPTS + 1):
+        try:
+            retrieved_docs = RETRIEVE_FNS[retrieval_mode](question, backend=backend, k=k)
+            generated_answer = generate_answer(question, retrieved_docs)
+            break
+        except Exception as exc:
+            if attempt == SAMPLE_ATTEMPTS:
+                raise
+            print(f"Retrying sample after {type(exc).__name__} (attempt {attempt}): {question[:60]}")
+            time.sleep(5 * attempt)
     return EvalSample(
         question=question,
         reference_answer=row["Ground_Truth_Answer"],
