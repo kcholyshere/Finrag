@@ -16,17 +16,23 @@ SYSTEM_PROMPT = (
     "row carefully to match the right column (e.g. fiscal year) to the right row "
     "before quoting or calculating a figure. When a question needs arithmetic "
     "(differences, percentage changes, ratios), call the calculate tool with the "
-    "figures from the context rather than computing mentally. If the context does "
-    "not contain the answer, say so plainly. Cite the page number(s) you used."
+    "figures from the context rather than computing mentally. Never mention tools, "
+    "function calls, or your reasoning process in the answer - answer directly. "
+    "If the context does not contain the answer, say so plainly. Cite the page "
+    "number(s) you used."
 )
 
 # The SDK auto-generates the function declaration from the callable, but its
 # automatic function calling is disabled here because it silently returns an
 # empty stream with generate_content_stream (google-genai 2.10.0) - so
 # stream_answer runs the execute-and-feed-back loop itself instead.
+# Low temperature guards against a degeneration observed at the default (1.0)
+# with tools attached: the model narrated its tool-use deliberation as answer
+# text and repetition-looped it (caught verbatim in a Langfuse trace).
 GENERATION_CONFIG = types.GenerateContentConfig(
     tools=[calculate],
     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    temperature=0.2,
 )
 
 # One round covers a multi-step expression; a few spares let the model recover
