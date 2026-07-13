@@ -1,3 +1,4 @@
+import re
 from functools import lru_cache
 from typing import Literal, Optional
 
@@ -25,9 +26,17 @@ def _load_index(backend: Backend):
     raise ValueError(f"Unknown backend: {backend}")
 
 
+def _bm25_tokenise(text: str) -> list[str]:
+    """Lowercase word tokens. BM25Retriever's default is a bare str.split(), so
+    "Table:" never matched a query's "table" and "2:" never matched "2" - case
+    and adjacent punctuation silently broke lexical matching across the corpus.
+    """
+    return re.findall(r"\w+", text.lower())
+
+
 @lru_cache(maxsize=None)
 def _load_bm25_retriever() -> BM25Retriever:
-    return BM25Retriever.from_documents(load_chunks())
+    return BM25Retriever.from_documents(load_chunks(), preprocess_func=_bm25_tokenise)
 
 
 def _to_qdrant_filter(metadata_filter: MetadataFilter) -> qdrant_models.Filter:
@@ -82,6 +91,29 @@ def retrieve_hybrid(
     return ensemble.invoke(query)
 
 
+_TABLE_REFERENCE_PATTERN = re.compile(r"\btable\s+(\d+)\b", re.IGNORECASE)
+
+
+def _structural_table_candidates(query: str) -> list[Document]:
+    """Chunks whose section names a table number the query references directly.
+
+    "Fetch table 2 data" is a lookup by document structure, not by content -
+    bag-of-words and dense similarity rank the actual Table 2 chunk 50th-80th
+    because "table" and single digits are near-stopwords in this corpus. A
+    direct section-title match puts the chunk in front of the cross-encoder,
+    which then ranks it correctly.
+    """
+    numbers = _TABLE_REFERENCE_PATTERN.findall(query)
+    if not numbers:
+        return []
+    prefixes = tuple(f"table {n}:" for n in numbers)
+    return [
+        chunk
+        for chunk in load_chunks()
+        if str(chunk.metadata.get("section", "")).lower().startswith(prefixes)
+    ]
+
+
 @observe(as_type="retriever")
 def retrieve_reranked(
     query: str,
@@ -92,4 +124,10 @@ def retrieve_reranked(
 ) -> list[Document]:
     """Cast a wider hybrid net, then use a cross-encoder to re-rank down to top-k."""
     candidates = retrieve_hybrid(query, backend=backend, k=candidate_k, dense_weight=dense_weight)
+    seen = {candidate.page_content for candidate in candidates}
+    candidates += [
+        extra
+        for extra in _structural_table_candidates(query)
+        if extra.page_content not in seen
+    ]
     return reranker.rerank(query, candidates, top_n=k)

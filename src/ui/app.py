@@ -17,6 +17,11 @@ def _markdown_table_to_df(markdown: str) -> pd.DataFrame | None:
         return None
     rows = [[cell.strip() for cell in line.strip("|").split("|")] for line in lines]
     header, _separator, *body = rows
+    if len(set(header)) != len(header):
+        # Spanned headers (e.g. "June 30, 2024" repeated across six columns) come
+        # out of Docling as duplicate cells; pandas accepts them but Streamlit's
+        # Arrow conversion crashes. The markdown fallback renders them faithfully.
+        return None
     try:
         return pd.DataFrame(body, columns=header)
     except ValueError:
