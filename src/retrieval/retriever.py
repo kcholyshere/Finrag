@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 from langfuse import observe
 from qdrant_client import models as qdrant_models
 
+from src import config
 from src.ingestion.chunk import load_chunks
 from src.retrieval import faiss_store, qdrant_store, reranker
 
@@ -114,6 +115,34 @@ def _structural_table_candidates(query: str) -> list[Document]:
     ]
 
 
+_PAGE_REFERENCE_PATTERN = re.compile(r"\bpage\s+(\d+)\b", re.IGNORECASE)
+
+
+def _structural_page_candidates(query: str) -> list[Document]:
+    """Chunks covering a printed page number the query references directly.
+
+    "Get the data from page 58" is a lookup by document structure, and page
+    numbers appear nowhere in the embedded text - similarity search cannot
+    target a page. The report's printed page numbers also run one behind
+    Docling's raw page index kept in chunk metadata (the cover page is
+    unnumbered - see config.PDF_PAGE_NUMBER_OFFSET), so the printed reference
+    is translated to raw numbering before matching against start/end_page.
+    """
+    numbers = _PAGE_REFERENCE_PATTERN.findall(query)
+    if not numbers:
+        return []
+    raw_pages = {int(n) + config.PDF_PAGE_NUMBER_OFFSET for n in numbers}
+    return [
+        chunk
+        for chunk in load_chunks()
+        if chunk.metadata.get("start_page") is not None
+        and any(
+            chunk.metadata["start_page"] <= page <= chunk.metadata["end_page"]
+            for page in raw_pages
+        )
+    ]
+
+
 @observe(as_type="retriever")
 def retrieve_reranked(
     query: str,
@@ -123,6 +152,16 @@ def retrieve_reranked(
     dense_weight: float = 0.5,
 ) -> list[Document]:
     """Cast a wider hybrid net, then use a cross-encoder to re-rank down to top-k."""
+    # Page references are handled before anything else: unlike table candidates
+    # (whose "Table N:" heading gives the cross-encoder a lexical anchor), page
+    # chunks contain no page tokens, so thrown into the global pool they lose to
+    # unrelated matches. Reranking them among themselves keeps the answer on the
+    # requested page, ordered by relevance to the rest of the query; the normal
+    # pipeline tops up only when the page yields fewer than k chunks.
+    page_results = reranker.rerank(query, _structural_page_candidates(query), top_n=k)
+    if len(page_results) >= k:
+        return page_results
+
     candidates = retrieve_hybrid(query, backend=backend, k=candidate_k, dense_weight=dense_weight)
     seen = {candidate.page_content for candidate in candidates}
     candidates += [
@@ -130,4 +169,6 @@ def retrieve_reranked(
         for extra in _structural_table_candidates(query)
         if extra.page_content not in seen
     ]
-    return reranker.rerank(query, candidates, top_n=k)
+    seen_pages = {doc.page_content for doc in page_results}
+    pool = [c for c in candidates if c.page_content not in seen_pages]
+    return page_results + reranker.rerank(query, pool, top_n=k - len(page_results))
