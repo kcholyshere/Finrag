@@ -4,15 +4,15 @@ FAISS backend only, same 200-row eval set, `k=4`. Each column adds exactly one c
 
 > Maintenance rule: every time the eval benchmark is run, add the result to the table below and update the diff/notes for that stage - don't let this doc drift out of sync with `data/processed/eval_runs/`.
 
-| Metric | Baseline (dense) | +Hybrid (BM25) | +Reranking (cross-encoder) | +Tables (Phase 5.1) | +Table retrievability fixes |
-|---|---|---|---|---|---|
-| Hit Rate@4 | 0.860 | 0.945 | 0.940 | 0.945 | 0.930 |
-| MRR@4 | 0.7125 | 0.7858 | 0.8600 | 0.8153 | 0.8604 |
-| context_precision | 0.7195 | 0.7637 | 0.8811 | 0.7590 | 0.8668 |
-| context_recall | 0.8015 | 0.9141 | 0.8821 | 0.9219 | 0.9100 |
-| faithfulness | 0.6571 | 0.6592 | 0.6794 | 0.6800 | 0.6917 |
-| answer_relevancy | 0.7746 | 0.8272 | 0.8395 | 0.8301 | 0.8598 |
-| answer_correctness | 0.5963 | 0.6383 | 0.6377 | 0.6501 | 0.6945 |
+| Metric | Baseline (dense) | +Hybrid (BM25) | +Reranking (cross-encoder) | +Tables (Phase 5.1) | +Table retrievability fixes | +Images (Phase 5.2) |
+|---|---|---|---|---|---|---|
+| Hit Rate@4 | 0.860 | 0.945 | 0.940 | 0.945 | 0.930 | 0.935 |
+| MRR@4 | 0.7125 | 0.7858 | 0.8600 | 0.8153 | 0.8604 | 0.8629 |
+| context_precision | 0.7195 | 0.7637 | 0.8811 | 0.7590 | 0.8668 | 0.8766 |
+| context_recall | 0.8015 | 0.9141 | 0.8821 | 0.9219 | 0.9100 | 0.9246 |
+| faithfulness | 0.6571 | 0.6592 | 0.6794 | 0.6800 | 0.6917 | 0.7184 |
+| answer_relevancy | 0.7746 | 0.8272 | 0.8395 | 0.8301 | 0.8598 | 0.8784 |
+| answer_correctness | 0.5963 | 0.6383 | 0.6377 | 0.6501 | 0.6945 | 0.7073 |
 
 Source files:
 - Baseline: `data/processed/eval_runs/2026-07-10T07-04-26.367728+00-00_faiss_dense_k4.json`
@@ -20,6 +20,7 @@ Source files:
 - +Reranking: `data/processed/eval_runs/2026-07-10T12-54-46.134674+00-00_faiss_reranked_k4.json` - reverted `parse.py`/`chunk.py`/`dataset.py` to pre-table commit `028db64~1` to keep the index text-only for this stage, then restored current code and rebuilt the table-inclusive index afterward.
 - +Tables: `data/processed/eval_runs/2026-07-10T10-35-40.149738+00-00_faiss_reranked_k4.json` (hybrid + reranking + table-inclusive index, all together)
 - +Table retrievability fixes: `data/processed/eval_runs/2026-07-13T17-17-40.291555+00-00_faiss_reranked_k4.json`
+- +Images: `data/processed/eval_runs/2026-07-14T09-45-34.314800+00-00_faiss_reranked_k4.json` (index rebuilt with 25 image-caption chunks: charts/diagrams captioned via Gemini multimodal with figures included, logos/signatures classified out; `answer.py` prompt gained an image-context instruction)
 
 Unlike earlier stages, the "+Table retrievability fixes" column bundles several changes shipped together on 2026-07-13 (see ADR-0007 and commits `036e7a8`..`48c66fa`): table chunks enriched with inline heading + cached Gemini summary, cross-encoder scoring tables by their heading/summary preamble, BM25 tokenisation fixed (lowercased word tokens instead of bare `str.split()`), "table N" queries injecting section-matched chunks into the reranker pool, calculator function calling, and generation temperature 0.2 (was default 1.0).
 
@@ -41,6 +42,7 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 - +Hybrid -> +Reranking: MRR +0.074 (biggest single-stage MRR jump) and context_precision +0.117, but Hit Rate@4 dipped slightly (-0.005) and answer_correctness is flat (+0.0 vs -0.0006, noise). Reranking's job is ordering, not recall - it can't find chunks hybrid didn't retrieve into the candidate pool, it can only push the right one higher once it's there. That's exactly what the numbers show: big precision/ranking gains, no real recall or end-to-end movement.
 - +Reranking -> +Tables: Hit Rate@4 +0.005, context_recall +0.040, answer_correctness +0.012. Modest, as expected given only 9 of 200 questions are table-typed - see below for why the table-specific numbers matter more than the blended ones here.
 - +Tables -> +Table retrievability fixes: answer_correctness +0.044 - the largest single-stage end-to-end gain on the whole ladder, beating even Baseline -> +Hybrid (+0.042). MRR@4 +0.045 (0.8604, best of any stage), context_precision +0.108, faithfulness +0.012 (also a ladder best), answer_relevancy +0.030. Hit Rate@4 dipped -0.015 and context_recall -0.012; some of that sits within the documented index-rebuild noise band (the FAISS HNSW build is not seeded deterministically), and the rest is consistent with the reranking trade-off seen before: sharper ordering (precision/MRR up) at the cost of a few borderline candidates dropping out of the top 4. The end-to-end outcome moving +0.044 while Hit Rate dipped says the chunks that ranked higher were the ones that actually mattered for answers.
+- +Table retrievability fixes -> +Images: every metric up, nothing regressed. answer_correctness +0.013 (0.7073) and faithfulness +0.027 (0.7184) are both ladder bests; answer_relevancy +0.019, context_recall +0.015. The image-question subset (n=6) drove it: Hit Rate@4 0.833 -> 1.000, MRR 0.750 -> 0.833. The faithfulness jump is notable given the round-2 experiments below showed generation-side tweaks couldn't move it: what worked was better context, not better instructions - chart captions state their figures explicitly, giving the judge verifiable support for claims that previously leaned on nearby narrative text. Table-question metrics are exactly unchanged, confirming the new chunks didn't disturb existing retrieval.
 
 ## Table questions (n=9 of 200)
 
@@ -51,8 +53,18 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 | +Reranking (no tables) | 0.556 | 0.426 |
 | +Tables | 0.667 | 0.509 |
 | +Table retrievability fixes | 0.667 | 0.667 |
+| +Images | 0.667 | 0.667 |
 
 Status after the 2026-07-13 retrievability fixes (root cause and fix documented in ADR-0007): every retrieved table hit now lands at rank 1 (MRR = Hit Rate). Of the 3 remaining misses, 2 are metric artefacts (the answer is retrieved verbatim from narrative text elsewhere and answered correctly, the page-based label just doesn't credit it) and 1 is genuinely hard ("total value of assets" is lexically closer to the report's many "fair value of assets" chunks than to the balance sheet).
+
+## Image questions (n=6 of 200, plus 2 image-and-text combination)
+
+| Stage | Hit Rate@4 | MRR@4 |
+|---|---|---|
+| +Table retrievability fixes (no image chunks) | 0.833 | 0.750 |
+| +Images | 1.000 | 0.833 |
+
+Before Phase 5.2 the index held no image content at all - image-typed questions scored against text chunks from the same pages (the labels are page-based), which is why the pre-images hit rate wasn't zero. With caption chunks indexed, all 6 image questions now retrieve a correct-page chunk in the top 4. The 2 combination (image and text) questions stay at 0.5/0.5 - multi-part questions needing both modalities in one top-4 window remain the hard case, same pattern as the table-and-text combinations.
 
 ## Faithfulness experiments
 
