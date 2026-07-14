@@ -4,15 +4,17 @@ FAISS backend only, same 200-row eval set, `k=4`. Each column adds exactly one c
 
 > Maintenance rule: every time the eval benchmark is run, add the result to the table below and update the diff/notes for that stage - don't let this doc drift out of sync with `data/processed/eval_runs/`.
 
-| Metric | Baseline (dense) | +Hybrid (BM25) | +Reranking (cross-encoder) | +Tables (Phase 5.1) | +Table retrievability fixes | +Images (Phase 5.2) |
-|---|---|---|---|---|---|---|
-| Hit Rate@4 | 0.860 | 0.945 | 0.940 | 0.945 | 0.930 | 0.935 |
-| MRR@4 | 0.7125 | 0.7858 | 0.8600 | 0.8153 | 0.8604 | 0.8629 |
-| context_precision | 0.7195 | 0.7637 | 0.8811 | 0.7590 | 0.8668 | 0.8766 |
-| context_recall | 0.8015 | 0.9141 | 0.8821 | 0.9219 | 0.9100 | 0.9246 |
-| faithfulness | 0.6571 | 0.6592 | 0.6794 | 0.6800 | 0.6917 | 0.7184 |
-| answer_relevancy | 0.7746 | 0.8272 | 0.8395 | 0.8301 | 0.8598 | 0.8784 |
-| answer_correctness | 0.5963 | 0.6383 | 0.6377 | 0.6501 | 0.6945 | 0.7073 |
+| Metric | Baseline (dense) | +Hybrid (BM25) | +Reranking (cross-encoder) | +Tables (Phase 5.1) | +Table retrievability fixes | +Images (Phase 5.2) | Delta since last component |
+|---|---|---|---|---|---|---|---|
+| Hit Rate@4 | 0.860 | 0.945 | 0.940 | 0.945 | 0.930 | 0.935 | +0.005 |
+| MRR@4 | 0.7125 | 0.7858 | 0.8600 | 0.8153 | 0.8604 | 0.8629 | +0.0025 |
+| context_precision | 0.7195 | 0.7637 | 0.8811 | 0.7590 | 0.8668 | 0.8766 | +0.0098 |
+| context_recall | 0.8015 | 0.9141 | 0.8821 | 0.9219 | 0.9100 | 0.9246 | +0.0146 |
+| faithfulness | 0.6571 | 0.6592 | 0.6794 | 0.6800 | 0.6917 | 0.7184 | +0.0267 |
+| answer_relevancy | 0.7746 | 0.8272 | 0.8395 | 0.8301 | 0.8598 | 0.8784 | +0.0186 |
+| answer_correctness | 0.5963 | 0.6383 | 0.6377 | 0.6501 | 0.6945 | 0.7073 | +0.0128 |
+
+The delta column always compares the two rightmost stages (current vs previous component) - recompute it whenever a new stage column is added.
 
 Source files:
 - Baseline: `data/processed/eval_runs/2026-07-10T07-04-26.367728+00-00_faiss_dense_k4.json`
