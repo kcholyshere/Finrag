@@ -42,9 +42,7 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 - +Reranking -> +Tables: Hit Rate@4 +0.005, context_recall +0.040, answer_correctness +0.012. Modest, as expected given only 9 of 200 questions are table-typed - see below for why the table-specific numbers matter more than the blended ones here.
 - +Tables -> +Table retrievability fixes: answer_correctness +0.044 - the largest single-stage end-to-end gain on the whole ladder, beating even Baseline -> +Hybrid (+0.042). MRR@4 +0.045 (0.8604, best of any stage), context_precision +0.108, faithfulness +0.012 (also a ladder best), answer_relevancy +0.030. Hit Rate@4 dipped -0.015 and context_recall -0.012; some of that sits within the documented index-rebuild noise band (the FAISS HNSW build is not seeded deterministically), and the rest is consistent with the reranking trade-off seen before: sharper ordering (precision/MRR up) at the cost of a few borderline candidates dropping out of the top 4. The end-to-end outcome moving +0.044 while Hit Rate dipped says the chunks that ranked higher were the ones that actually mattered for answers.
 
-## Still weak
-
-`table` questions (n=9 of 200):
+## Table questions (n=9 of 200)
 
 | Stage | Hit Rate@4 | MRR@4 |
 |---|---|---|
@@ -54,9 +52,7 @@ Caveat: the +Reranking run uses the current (table-aware) generation prompt word
 | +Tables | 0.667 | 0.509 |
 | +Table retrievability fixes | 0.667 | 0.667 |
 
-Table Hit Rate never got past 0.667 even after tables were actually indexed - no better than the +Hybrid stage which had no table chunks at all. MRR did climb steadily. Reranking alone regressed Hit Rate for tables specifically (0.667 -> 0.556) even though it helped every other category - consistent with reranking only reordering a candidate pool that dense+BM25 assembled, and that pool apparently wasn't reliably including the right table chunk pre-Phase-5.1 anyway.
-
-The 2026-07-13 investigation (ADR-0007) explained the 0.667 ceiling. Root cause: table chunks embedded only bare pipe markdown - the caption/section lived in metadata, which is never embedded - so question-shaped queries could not match tables (the misses never entered the reranker candidate pool). Enriching table chunks with an inline heading + LLM summary and scoring them in the cross-encoder by that preamble took table MRR@4 from 0.509 to 0.667, with every retrieved table hit landing at rank 1 (MRR = Hit Rate means exactly that). The 3 remaining page-label misses split into: 2 metric artefacts (the answers appear verbatim in narrative text elsewhere in the report, which is retrieved and produces correct end-to-end answers - the page-based label just does not credit the alternative source), and 1 genuinely hard case ("total value of assets" is lexically closer to the report's many "fair value of assets" chunks than to the balance sheet).
+Status after the 2026-07-13 retrievability fixes (root cause and fix documented in ADR-0007): every retrieved table hit now lands at rank 1 (MRR = Hit Rate). Of the 3 remaining misses, 2 are metric artefacts (the answer is retrieved verbatim from narrative text elsewhere and answered correctly, the page-based label just doesn't credit it) and 1 is genuinely hard ("total value of assets" is lexically closer to the report's many "fair value of assets" chunks than to the balance sheet).
 
 ## Faithfulness experiments
 
