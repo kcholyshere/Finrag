@@ -25,11 +25,15 @@ Unlike earlier stages, the "+Table retrievability fixes" column bundles several 
 
 Caveat: the +Reranking run uses the current (table-aware) generation prompt wording in `answer.py`, not the pre-table prompt - negligible effect since no table chunks exist yet at that stage to trigger the table-specific instructions.
 
-## Reading Hit Rate@4 and MRR@4
+## Reading metrics
 
-- Hit Rate@4: of the top 4 retrieved chunks, did any of them contain the ground-truth answer? Yes/no per question, averaged over 200 questions. 0.945 means the right chunk showed up somewhere in the top 4 for 94.5% of questions.
-- MRR@4 (Mean Reciprocal Rank): same top-4 window, but scored by how high the right chunk ranked, not just whether it appeared. 1st place = 1.0, 2nd = 0.5, 3rd = 0.33, 4th = 0.25, not present = 0. Averaged over 200 questions.
-- Hit Rate answers "did we find it at all", MRR answers "how far down did the model have to dig". A big MRR jump with a flat/small Hit Rate move (as in +Reranking below) means the right chunk was usually already in the top 4, reranking just moved it higher within that window.
+- Hit Rate@4: did any of the top 4 retrieved chunks contain the ground-truth answer (yes/no per question, averaged)?
+- MRR@4: how high the right chunk ranked within the top 4 (1st = 1.0, 2nd = 0.5, 3rd = 0.33, 4th = 0.25, absent = 0, averaged).
+- context_precision: how much of the retrieved context is actually relevant to the question (RAGAS, LLM-graded).
+- context_recall: how much of the ground-truth answer is covered by the retrieved context (RAGAS, LLM-graded).
+- faithfulness: how well the generated answer's claims are supported by the retrieved context, i.e. absence of hallucination (RAGAS, LLM-graded).
+- answer_relevancy: how directly the generated answer addresses the question asked (RAGAS, LLM-graded).
+- answer_correctness: how well the generated answer matches the ground-truth answer, the end-to-end outcome metric (RAGAS, LLM-graded).
 
 ## What improved, stage by stage
 
