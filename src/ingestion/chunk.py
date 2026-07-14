@@ -4,6 +4,7 @@ from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src import config
+from src.ingestion.enrich import INFORMATIVE_KINDS
 
 NOISE_LABELS = {"page_footer", "page_header"}
 
@@ -82,6 +83,33 @@ def chunk_tables(table_records: list[dict]) -> list[Document]:
     ]
 
 
+def _image_page_content(record: dict) -> str:
+    """The Gemini description is the whole retrievable/generatable text for an
+    image - the pixels never reach the answer model - so it goes in verbatim,
+    headed by the report's own caption where one exists."""
+    heading = record.get("caption") or record.get("section")
+    header = f"Figure: {heading}" if heading else "Figure"
+    return f"{header}\n{record['description']}"
+
+
+def chunk_images(image_records: list[dict]) -> list[Document]:
+    """One chunk per informative image; logos, signatures, and decorations are
+    captioned upstream but dropped here (mirrors NOISE_LABELS for text)."""
+    return [
+        Document(
+            page_content=_image_page_content(record),
+            metadata={
+                "section": record["section"],
+                "start_page": record["page"],
+                "end_page": record["page"],
+                "content_type": "image",
+            },
+        )
+        for record in image_records
+        if record["kind"] in INFORMATIVE_KINDS
+    ]
+
+
 def save_chunks(chunks: list[Document]) -> None:
     CHUNKS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(CHUNKS_PATH, "w") as f:
@@ -102,8 +130,13 @@ def load_chunks() -> list[Document]:
 
 
 if __name__ == "__main__":
-    from src.ingestion.enrich import summarise_tables
-    from src.ingestion.parse import extract_table_records, extract_text_records, load_or_parse_pdf
+    from src.ingestion.enrich import caption_images, summarise_tables
+    from src.ingestion.parse import (
+        extract_image_records,
+        extract_table_records,
+        extract_text_records,
+        load_or_parse_pdf,
+    )
 
     doc = load_or_parse_pdf()
     records = extract_text_records(doc)
@@ -113,9 +146,13 @@ if __name__ == "__main__":
     table_records = summarise_tables(extract_table_records(doc))
     table_chunks = chunk_tables(table_records)
 
-    chunks = text_chunks + table_chunks
+    image_records = caption_images(extract_image_records(doc))
+    image_chunks = chunk_images(image_records)
+
+    chunks = text_chunks + table_chunks + image_chunks
     save_chunks(chunks)
     print(
         f"{len(sections)} sections -> {len(text_chunks)} text chunks, "
-        f"{len(table_chunks)} table chunks, saved to {CHUNKS_PATH}"
+        f"{len(table_chunks)} table chunks, {len(image_chunks)} image chunks, "
+        f"saved to {CHUNKS_PATH}"
     )

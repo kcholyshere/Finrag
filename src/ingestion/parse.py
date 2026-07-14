@@ -1,4 +1,6 @@
-from docling.document_converter import DocumentConverter
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.types.doc.document import DoclingDocument
 
 from src import config
@@ -7,7 +9,12 @@ DOCLING_JSON_PATH = config.INTERIM_DIR / "ifc-annual-report-2024-financials.docl
 
 
 def parse_pdf() -> DoclingDocument:
-    converter = DocumentConverter()
+    # Picture images are off by default and Phase 5.2 needs the pixels for
+    # captioning; scale 2 keeps small chart labels legible for the vision model.
+    pipeline_options = PdfPipelineOptions(generate_picture_images=True, images_scale=2.0)
+    converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+    )
     result = converter.convert(config.PDF_PATH)
     document = result.document
 
@@ -55,6 +62,35 @@ def extract_table_records(document: DoclingDocument) -> list[dict]:
     return records
 
 
+def extract_image_records(document: DoclingDocument) -> list[dict]:
+    """Flatten the parsed document's pictures into records with page/section metadata.
+
+    "image" holds a PIL image (from the parse run with generate_picture_images=True);
+    pictures parsed without pixel data are skipped with a warning rather than
+    crashing captioning downstream.
+    """
+    page_to_section = _build_page_to_section(document)
+    records = []
+
+    for picture in document.pictures:
+        image = picture.get_image(document)
+        if image is None:
+            print(f"Skipping picture {picture.self_ref}: no image data in parse")
+            continue
+
+        page_no = picture.prov[0].page_no if picture.prov else None
+        records.append(
+            {
+                "image": image,
+                "caption": picture.caption_text(document) or None,
+                "page": page_no,
+                "section": page_to_section.get(page_no),
+            }
+        )
+
+    return records
+
+
 def extract_text_records(document: DoclingDocument) -> list[dict]:
     """Flatten the parsed document into text records with page/section metadata.
 
@@ -85,5 +121,6 @@ if __name__ == "__main__":
     doc = parse_pdf()
     print(
         f"Parsed {doc.num_pages()} pages, {len(doc.texts)} text items, "
-        f"{len(doc.tables)} tables, saved to {DOCLING_JSON_PATH}"
+        f"{len(doc.tables)} tables, {len(doc.pictures)} pictures, "
+        f"saved to {DOCLING_JSON_PATH}"
     )

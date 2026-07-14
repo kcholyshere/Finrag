@@ -11,9 +11,20 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
-from src.ingestion.chunk import chunk_sections, chunk_tables, group_into_sections, save_chunks
-from src.ingestion.enrich import summarise_tables
-from src.ingestion.parse import extract_table_records, extract_text_records, load_or_parse_pdf
+from src.ingestion.chunk import (
+    chunk_images,
+    chunk_sections,
+    chunk_tables,
+    group_into_sections,
+    save_chunks,
+)
+from src.ingestion.enrich import caption_images, summarise_tables
+from src.ingestion.parse import (
+    extract_image_records,
+    extract_table_records,
+    extract_text_records,
+    load_or_parse_pdf,
+)
 from src.retrieval import faiss_store, qdrant_store
 
 
@@ -21,7 +32,7 @@ def run() -> None:
     document = load_or_parse_pdf()
     print(
         f"Parsed {document.num_pages()} pages, {len(document.texts)} text items, "
-        f"{len(document.tables)} tables"
+        f"{len(document.tables)} tables, {len(document.pictures)} pictures"
     )
 
     records = extract_text_records(document)
@@ -31,9 +42,15 @@ def run() -> None:
     table_records = summarise_tables(extract_table_records(document))
     table_chunks = chunk_tables(table_records)
 
-    chunks = text_chunks + table_chunks
+    image_records = caption_images(extract_image_records(document))
+    image_chunks = chunk_images(image_records)
+
+    chunks = text_chunks + table_chunks + image_chunks
     save_chunks(chunks)
-    print(f"{len(sections)} sections -> {len(text_chunks)} text chunks, {len(table_chunks)} table chunks")
+    print(
+        f"{len(sections)} sections -> {len(text_chunks)} text chunks, "
+        f"{len(table_chunks)} table chunks, {len(image_chunks)} image chunks"
+    )
 
     faiss_index = faiss_store.build_index(chunks)
     faiss_store.save_index(faiss_index)
