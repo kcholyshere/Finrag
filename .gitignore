@@ -97,6 +97,7 @@ target/
 
 # Ingestion pipeline outputs - regenerate via `python -m src.dataset`
 data/interim/*.json
+data/interim/page_images/
 data/processed/*.jsonl
 
 # Eval run outputs - regenerate via `python -m src.evaluation.run_eval`

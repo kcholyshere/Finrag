@@ -15,3 +15,4 @@ langfuse
 ragas
 langchain-google-vertexai
 rapidfuzz
+pymupdf
