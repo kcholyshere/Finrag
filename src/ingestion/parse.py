@@ -1,7 +1,7 @@
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
-from docling_core.types.doc.document import DoclingDocument
+from docling_core.types.doc.document import DoclingDocument, PictureItem, TableItem
 
 from src import config
 
@@ -29,23 +29,32 @@ def load_or_parse_pdf() -> DoclingDocument:
     return parse_pdf()
 
 
-def _build_page_to_section(document: DoclingDocument) -> dict[int, str]:
-    """Map each page number to whichever section header was active on that page."""
-    page_to_section: dict[int, str] = {}
+def _build_item_to_section(document: DoclingDocument) -> dict[str, str | None]:
+    """Map each table/picture's self_ref to the section header governing it.
+
+    Walks the document once via iterate_items(), which interleaves text,
+    tables, and pictures in true reading order, tracking the most recent
+    section header seen. This replaces the old page-keyed map, which
+    overwrote its entry with whichever header appeared last on a page - wrong
+    whenever a page holds more than one section (131 of 147 pages here), e.g.
+    two tables on the same page ended up sharing one label instead of each
+    getting the header that actually precedes it.
+    """
+    item_to_section: dict[str, str | None] = {}
     current_section = None
 
-    for item in document.texts:
-        if item.label == "section_header":
+    for item, _level in document.iterate_items():
+        if str(getattr(item, "label", "")) == "section_header":
             current_section = item.text
-        if item.prov:
-            page_to_section[item.prov[0].page_no] = current_section
+        elif isinstance(item, (TableItem, PictureItem)):
+            item_to_section[item.self_ref] = current_section
 
-    return page_to_section
+    return item_to_section
 
 
 def extract_table_records(document: DoclingDocument) -> list[dict]:
     """Flatten the parsed document's tables into markdown records with page/section metadata."""
-    page_to_section = _build_page_to_section(document)
+    item_to_section = _build_item_to_section(document)
     records = []
 
     for table in document.tables:
@@ -55,7 +64,7 @@ def extract_table_records(document: DoclingDocument) -> list[dict]:
                 "text": table.export_to_markdown(document),
                 "caption": table.caption_text(document) or None,
                 "page": page_no,
-                "section": page_to_section.get(page_no),
+                "section": item_to_section.get(table.self_ref),
             }
         )
 
@@ -69,7 +78,7 @@ def extract_image_records(document: DoclingDocument) -> list[dict]:
     pictures parsed without pixel data are skipped with a warning rather than
     crashing captioning downstream.
     """
-    page_to_section = _build_page_to_section(document)
+    item_to_section = _build_item_to_section(document)
     records = []
 
     for picture in document.pictures:
@@ -84,7 +93,7 @@ def extract_image_records(document: DoclingDocument) -> list[dict]:
                 "image": image,
                 "caption": picture.caption_text(document) or None,
                 "page": page_no,
-                "section": page_to_section.get(page_no),
+                "section": item_to_section.get(picture.self_ref),
             }
         )
 

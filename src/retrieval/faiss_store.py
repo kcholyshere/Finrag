@@ -16,9 +16,17 @@ HNSW_EF_CONSTRUCTION = 200
 HNSW_EF_SEARCH = 128
 
 
-def build_index(chunks: list[Document]) -> FAISS:
-    embeddings = GeminiEmbeddings()
-    vectors = embeddings.embed_documents([chunk.page_content for chunk in chunks])
+def build_index(chunks: list[Document], vectors: list[list[float]]) -> FAISS:
+    """Build the HNSW index from chunks and their precomputed embedding vectors.
+
+    Vectors are computed once by the caller (dataset.py) and shared with the
+    Qdrant build (A16) - embedding all ~852 chunks is the single most
+    expensive/costly step in a rebuild, so doing it twice (once per store) was
+    pure waste and a drift path between the two indexes.
+    """
+    if len(vectors) != len(chunks):
+        raise ValueError(f"Got {len(vectors)} vectors for {len(chunks)} chunks")
+    embeddings = GeminiEmbeddings()  # kept on the store for query-time embed_query
 
     index = faiss.IndexHNSWFlat(len(vectors[0]), HNSW_M)
     index.hnsw.efConstruction = HNSW_EF_CONSTRUCTION

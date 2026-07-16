@@ -11,6 +11,7 @@ import os
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+from src.embedding.embedder import GeminiEmbeddings
 from src.ingestion.chunk import (
     chunk_images,
     chunk_sections,
@@ -52,11 +53,17 @@ def run() -> None:
         f"{len(table_chunks)} table chunks, {len(image_chunks)} image chunks"
     )
 
-    faiss_index = faiss_store.build_index(chunks)
+    print(f"Embedding {len(chunks)} chunks...")
+    # Computed once and shared between both stores (A16) - embedding is by far
+    # the most expensive step here, and QdrantVectorStore.from_documents used
+    # to redo it from scratch after FAISS already had.
+    vectors = GeminiEmbeddings().embed_documents([chunk.page_content for chunk in chunks])
+
+    faiss_index = faiss_store.build_index(chunks, vectors)
     faiss_store.save_index(faiss_index)
     print("FAISS index built and saved")
 
-    qdrant_store.build_index(chunks)
+    qdrant_store.build_index(chunks, vectors)
     print("Qdrant index built and saved")
 
 
