@@ -28,6 +28,11 @@ Unlike earlier stages, the "+Table retrievability fixes" column bundles several 
 
 Caveat: the +Reranking run uses the current (table-aware) generation prompt wording in `answer.py`, not the pre-table prompt - negligible effect since no table chunks exist yet at that stage to trigger the table-specific instructions.
 
+Caveats from the 2026-07-16 codebase audit (`reports/codebase_audit_2026-07-16.md`, findings A2 and A9), applying to the chunk-pipeline columns above:
+
+- A2 (all columns): Hit Rate@4/MRR@4 match ground-truth pages against only a chunk's start/end page, and every sub-chunk of a split multi-page section carries the whole section's page span - so ~9% of text chunks can be miscounted in both directions (a middle-page ground truth never matches a section-spanning chunk; an endpoint match can credit content that really sits on a different page). Per-sample retrievals are not persisted in the run JSONs, so correcting this means re-running stages with range matching, not re-scoring existing files. Within-ladder deltas are less affected (the bias is shared across columns); absolute values and comparisons against pipelines with exact page metadata are.
+- A9 (+Hybrid column only): `retrieve_hybrid` returns the ensemble's full deduplicated output (up to 2 x k docs, never truncated to k). The rank metrics slice to k, but the RAGAS metrics and generation for that column saw roughly double the context of neighbouring columns, flattering recall-type metrics at that stage.
+
 ## Reading metrics
 
 - Hit Rate@4: did any of the top 4 retrieved chunks contain the ground-truth answer (yes/no per question, averaged)?
@@ -99,6 +104,7 @@ Reading:
 - Images flip the other way (1.000 -> 0.833): the caption pipeline was tuned for exactly those 6 questions (figure-bearing captions), while ColPali must rank the right chart page among many visually similar chart pages.
 - The end-to-end gap is generation, not retrieval: retrieval is near-parity (-0.01 hit rate) but answer_correctness drops -0.053. Reading precise figures off a 150-DPI page render is harder than reading them from extracted markdown/captions, and each retrieved page carries a full page of distractor content. Curated text remains the better generation substrate; pages are the better retrieval substrate for visually-structured content.
 - MRR@4 (-0.061) is the honest cost of dropping the cross-encoder: ColPali finds the right page but ranks it top-of-list less often.
+- Comparability caveat (audit finding A2, see the ladder caveats above): the chunk pipeline's Hit Rate/MRR carry page-span matching noise that ColPali's exact per-page metadata does not, so the -0.010 headline gap is approximate and could sit a little either side of zero. The qualitative reading (near-parity, tables win, images flip) is robust to it; treat the second decimal as noise until the chunk stages are re-run with range matching.
 - Operational trade-offs (not in the table): ColPali indexing is one ~10 min local batch (no Vertex calls, no enrichment prompts to maintain) vs the multi-step parse/summarise/caption/rebuild chain; but query-time needs a ~5GB local VLM and a MaxSim pass (~1-2s) vs a cheap embedding call, and generation ships ~4 PNG pages per question to Gemini instead of ~4 KB-sized text chunks.
 
 Source file: `data/processed/eval_runs/2026-07-16T11-18-25.243270+00-00_qdrant_colpali_k4.json`. Run notes: 200/200 samples, zero retries; run twice after a first attempt crashed on a thread-safety bug (six eval workers concurrently cold-loading the VLM - fixed by widening the model lock in `colpali_embedder.py`).
