@@ -82,13 +82,17 @@ def _build_contents(query: str, context_docs: list[Document]) -> list:
     context = "\n\n".join(context_blocks)
     prompt = f"{SYSTEM_PROMPT}\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
 
-    image_parts = [
-        types.Part.from_bytes(
-            data=(config.PROJECT_ROOT / d.metadata["image_path"]).read_bytes(),
-            mime_type="image/png",
-        )
-        for d in page_docs
-    ]
+    image_parts = []
+    for d in page_docs:
+        image_path = config.PROJECT_ROOT / d.metadata["image_path"]
+        try:
+            data = image_path.read_bytes()
+        except FileNotFoundError as exc:
+            raise FileNotFoundError(
+                f"Page image not found at {image_path}. Regenerate page images "
+                "with `python -m src.ingestion.page_images`."
+            ) from exc
+        image_parts.append(types.Part.from_bytes(data=data, mime_type="image/png"))
     return [prompt, *image_parts]
 
 
@@ -143,7 +147,7 @@ def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
                 role="user",
                 parts=[
                     types.Part.from_function_response(
-                        name=fc.name, response=_run_calculate(dict(fc.args))
+                        name=fc.name, response=_run_calculate(dict(fc.args or {}))
                     )
                     for fc in function_calls
                 ],

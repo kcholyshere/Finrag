@@ -7,6 +7,7 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from langfuse import observe
 from qdrant_client import models as qdrant_models
+from qdrant_client.http.exceptions import ApiException
 
 from src import config
 from src.ingestion.chunk import load_chunks
@@ -106,12 +107,23 @@ def retrieve_colpali(query: str, k: int = 4) -> list[Document]:
     # app, eval harness) can import this module without loading it.
     from src.embedding.colpali_embedder import embed_query
 
-    result = qdrant_store.get_client().query_points(
-        collection_name=config.QDRANT_COLPALI_COLLECTION,
-        query=embed_query(query).tolist(),
-        limit=k,
-        with_payload=True,
-    )
+    try:
+        result = qdrant_store.get_client().query_points(
+            collection_name=config.QDRANT_COLPALI_COLLECTION,
+            query=embed_query(query).tolist(),
+            limit=k,
+            with_payload=True,
+        )
+    except ApiException as exc:
+        # Covers both a down Qdrant (connection failure wrapped as
+        # ResponseHandlingException) and a missing collection (non-2xx response
+        # as UnexpectedResponse) - either way the raw httpx/qdrant error is
+        # meaningless to a client-facing user, so surface an actionable message.
+        raise RuntimeError(
+            "Could not reach the ColPali page collection in Qdrant. Check that "
+            "Qdrant is running (`docker compose up -d qdrant`) and that the "
+            "collection has been built (`python -m src.colpali_dataset`)."
+        ) from exc
     return [
         Document(
             page_content=(

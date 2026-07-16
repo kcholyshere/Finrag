@@ -96,37 +96,60 @@ if query:
             "This is usually transient - please try the question again."
         )
         st.stop()
+    except Exception as exc:
+        # Catches everything the APIError guard above misses: a missing FAISS
+        # index, Qdrant down, a missing ColPali collection, or a missing page
+        # PNG. The retriever/generation layers raise these with a message
+        # that's already written to be shown directly to the user.
+        st.error(str(exc))
+        st.stop()
 
     st.subheader("Retrieved source snippets")
     for i, doc in enumerate(docs, start=1):
-        page = config.display_page(doc.metadata.get("start_page"))
-
-        if doc.metadata.get("content_type") == "page_image":
-            # ColPali pipeline source attribution: the retrieved unit is the
-            # whole report page, so show the page itself - the literal pixels
-            # the model answered from.
-            score = doc.metadata.get("score")
-            with st.expander(f"[{i}] Report page {page} (MaxSim score {score:.2f})"):
-                st.image(str(config.PROJECT_ROOT / doc.metadata["image_path"]))
-            continue
-
-        section = doc.metadata.get("section")
-        with st.expander(f"[{i}] {section} (page {page})"):
-            df = None
-            if doc.metadata.get("content_type") == "table":
-                df = _markdown_table_to_df(doc.page_content)
-            if df is not None:
-                # Table chunks carry a "Table: <caption>" heading and LLM summary
-                # above the markdown table (retrieval enrichment) - show that
-                # preamble as a caption rather than losing it to the dataframe.
-                preamble = "\n".join(
-                    line
-                    for line in doc.page_content.splitlines()
-                    if not line.strip().startswith("|")
-                ).strip()
-                if preamble:
-                    st.caption(preamble)
-                st.dataframe(df, use_container_width=True)
+        is_page_image = doc.metadata.get("content_type") == "page_image"
+        try:
+            page = config.display_page(doc.metadata.get("start_page"))
+            if is_page_image:
+                # ColPali pipeline source attribution: the retrieved unit is
+                # the whole report page, so show the page itself - the
+                # literal pixels the model answered from.
+                score = doc.metadata.get("score")
+                title = f"[{i}] Report page {page} (MaxSim score {score:.2f})"
             else:
-                # Same "$...$" markdown-math escape as the answer text above.
-                st.markdown(doc.page_content.replace("$", r"\$"))
+                title = f"[{i}] {doc.metadata.get('section')} (page {page})"
+        except Exception:
+            # Malformed metadata (e.g. a missing score) shouldn't crash the
+            # whole loop - fall through with a bare title and let the render
+            # try/except below report the real error.
+            title = f"[{i}] Source"
+
+        with st.expander(title):
+            # One bad source (e.g. a missing page image) should not take down
+            # the rest of the list - degrade that entry to an error and keep
+            # rendering the remaining sources.
+            try:
+                if is_page_image:
+                    st.image(str(config.PROJECT_ROOT / doc.metadata["image_path"]))
+                    continue
+
+                df = None
+                if doc.metadata.get("content_type") == "table":
+                    df = _markdown_table_to_df(doc.page_content)
+                if df is not None:
+                    # Table chunks carry a "Table: <caption>" heading and LLM summary
+                    # above the markdown table (retrieval enrichment) - show that
+                    # preamble as a caption rather than losing it to the dataframe.
+                    preamble = "\n".join(
+                        line
+                        for line in doc.page_content.splitlines()
+                        if not line.strip().startswith("|")
+                    ).strip()
+                    if preamble:
+                        # Same "$...$" markdown-math escape as the answer text above.
+                        st.caption(preamble.replace("$", r"\$"))
+                    st.dataframe(df, use_container_width=True)
+                else:
+                    # Same "$...$" markdown-math escape as the answer text above.
+                    st.markdown(doc.page_content.replace("$", r"\$"))
+            except Exception as exc:
+                st.error(str(exc))
