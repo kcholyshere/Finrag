@@ -14,11 +14,16 @@ services:
     environment:
       QDRANT_HOST: qdrant
       GOOGLE_APPLICATION_CREDENTIALS: /gcp/adc.json
+      HF_HOME: /app/.cache/huggingface
     volumes:
       - ${HOME}/.config/gcloud/application_default_credentials.json:/gcp/adc.json:ro
       - ./models/faiss:/app/models/faiss:ro
+      - ./data/processed:/app/data/processed:ro
+      - ./data/interim/page_images:/app/data/interim/page_images:ro
+      - hf_cache:/app/.cache/huggingface
     depends_on:
       - qdrant
 
 volumes:
   qdrant_storage:
+  hf_cache:
