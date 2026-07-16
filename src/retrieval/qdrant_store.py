@@ -4,6 +4,7 @@ import numpy as np
 from langchain_core.documents import Document
 from langchain_qdrant import QdrantVectorStore
 from qdrant_client import QdrantClient, models
+from qdrant_client.http.exceptions import ApiException
 
 from src import config
 from src.embedding.embedder import GeminiEmbeddings
@@ -24,6 +25,18 @@ def get_client() -> QdrantClient:
     return QdrantClient(host=config.QDRANT_HOST, port=config.QDRANT_PORT)
 
 
+def _ensure_reachable(client: QdrantClient) -> None:
+    """Fail fast with an actionable message rather than a raw httpx error deep
+    inside a build - a down Qdrant container is the single most likely cause,
+    and by far the easiest to fix."""
+    try:
+        client.get_collections()
+    except ApiException as exc:
+        raise RuntimeError(
+            "Could not reach Qdrant. Is it running? Try `docker compose up -d qdrant`."
+        ) from exc
+
+
 def build_index(chunks: list[Document], vectors: list[list[float]]) -> None:
     """Recreate the text collection from chunks and their precomputed vectors.
 
@@ -39,6 +52,7 @@ def build_index(chunks: list[Document], vectors: list[list[float]]) -> None:
         raise ValueError(f"Got {len(vectors)} vectors for {len(chunks)} chunks")
 
     client = get_client()
+    _ensure_reachable(client)
     if client.collection_exists(config.QDRANT_COLLECTION):
         client.delete_collection(config.QDRANT_COLLECTION)
     client.create_collection(
@@ -94,6 +108,7 @@ def build_colpali_index(pages: list[tuple[int, np.ndarray, str]]) -> None:
     the process runs from.
     """
     client = get_client()
+    _ensure_reachable(client)
     client.delete_collection(config.QDRANT_COLPALI_COLLECTION)
     client.create_collection(
         collection_name=config.QDRANT_COLPALI_COLLECTION,

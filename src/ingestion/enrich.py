@@ -18,6 +18,7 @@ import hashlib
 import io
 import json
 import os
+import time
 from pathlib import Path
 from typing import Literal
 
@@ -29,6 +30,24 @@ from src.services.genai_client import get_client
 
 SUMMARIES_PATH = config.INTERIM_DIR / "table_summaries.json"
 CAPTIONS_PATH = config.INTERIM_DIR / "image_captions.json"
+
+# Attempts/backoff for a single generate_content call. Enrichment is a ~190-call
+# sequential run; without this, one transient blip (rate limit, brief network
+# error) kills the whole batch instead of just costing a few seconds - the
+# per-item cache already makes a genuine failure resumable, so this only
+# covers the pointless case of a full restart over one blip.
+API_CALL_ATTEMPTS = 3
+API_CALL_BACKOFF_SECONDS = 2.0
+
+
+def _call_with_backoff(fn):
+    for attempt in range(API_CALL_ATTEMPTS):
+        try:
+            return fn()
+        except Exception:
+            if attempt == API_CALL_ATTEMPTS - 1:
+                raise
+            time.sleep(API_CALL_BACKOFF_SECONDS * (attempt + 1))
 
 
 def _context(caption: str | None, section: str | None) -> str | None:
@@ -84,7 +103,9 @@ def _summarise(markdown: str, caption: str | None, section: str | None) -> str:
     # text part at all; a missing summary just means that table is indexed
     # without enrichment, which is not worth failing the whole pipeline over.
     for _ in range(2):
-        response = get_client().models.generate_content(model=config.GEMINI_MODEL, contents=prompt)
+        response = _call_with_backoff(
+            lambda: get_client().models.generate_content(model=config.GEMINI_MODEL, contents=prompt)
+        )
         if response.text:
             return response.text.strip()
     print(f"  No summary returned for table (caption/section: {context!r}), indexing without one")
@@ -117,8 +138,8 @@ def summarise_tables(table_records: list[dict]) -> list[dict]:
 # Unlike table summaries, image descriptions must include the key figures and
 # trends: a table chunk carries its raw markdown below the summary, but for an
 # image the description is the only text the retriever and generator ever see.
-# Gemini also classifies each picture so logos/signatures (16 of the report's
-# 36 pictures) are captioned once but never indexed.
+# Gemini also classifies each picture so logos/signatures (11 of the report's
+# 36 pictures, the other 25 informative) are captioned once but never indexed.
 
 CAPTION_PROMPT = (
     "You are indexing figures from the IFC Annual Report 2024 (Financials) for "
@@ -167,12 +188,14 @@ def _caption(png_bytes: bytes, caption: str | None, section: str | None) -> dict
     # blocked generation) used to raise AttributeError and kill the whole
     # captioning batch instead of just this one image.
     for _ in range(2):
-        response = get_client().models.generate_content(
-            model=config.GEMINI_MODEL,
-            contents=[prompt, types.Part.from_bytes(data=png_bytes, mime_type="image/png")],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json", response_schema=ImageCaption
-            ),
+        response = _call_with_backoff(
+            lambda: get_client().models.generate_content(
+                model=config.GEMINI_MODEL,
+                contents=[prompt, types.Part.from_bytes(data=png_bytes, mime_type="image/png")],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json", response_schema=ImageCaption
+                ),
+            )
         )
         if response.parsed is not None:
             return response.parsed.model_dump()

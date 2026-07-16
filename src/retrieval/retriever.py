@@ -3,6 +3,11 @@ from functools import lru_cache
 from typing import Literal, Optional
 
 from langchain_classic.retrievers.ensemble import EnsembleRetriever
+
+# langchain_community is sunset upstream, but langchain_classic.retrievers.BM25Retriever
+# is itself just a deprecated lazy re-export of this same class (confirmed against the
+# installed package) - moving to it would add a deprecation warning without removing the
+# dependency. Pinned deliberately until BM25Retriever gets a real non-community home.
 from langchain_community.retrievers import BM25Retriever
 from langchain_core.documents import Document
 from langfuse import observe

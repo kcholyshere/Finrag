@@ -1,5 +1,15 @@
+import os
+import tempfile
+
 import faiss
 import numpy as np
+
+# langchain_community is sunset upstream, but there is no drop-in replacement:
+# langchain_classic.vectorstores.FAISS / .docstore.in_memory.InMemoryDocstore
+# are themselves just deprecated lazy re-exports of these same community
+# classes (confirmed against the installed package), so routing through them
+# would add a deprecation warning without removing the dependency. Pinned
+# deliberately until upstream gives FAISS a real non-community home.
 from langchain_community.docstore.in_memory import InMemoryDocstore
 from langchain_community.vectorstores import FAISS
 from langchain_core.documents import Document
@@ -15,6 +25,14 @@ HNSW_M = 32
 HNSW_EF_CONSTRUCTION = 200
 HNSW_EF_SEARCH = 128
 
+# FAISS's IndexHNSWFlat scores L2 distance, Qdrant's collection scores cosine -
+# the two rankings only agree while every vector is unit-norm (L2 on unit
+# vectors is a monotonic function of cosine similarity). Nothing upstream
+# enforces that, so a future embedding model or config change that returns
+# unnormalised vectors would silently desync FAISS ranking from Qdrant's
+# without either side erroring.
+UNIT_NORM_ATOL = 1e-3
+
 
 def build_index(chunks: list[Document], vectors: list[list[float]]) -> FAISS:
     """Build the HNSW index from chunks and their precomputed embedding vectors.
@@ -26,6 +44,17 @@ def build_index(chunks: list[Document], vectors: list[list[float]]) -> FAISS:
     """
     if len(vectors) != len(chunks):
         raise ValueError(f"Got {len(vectors)} vectors for {len(chunks)} chunks")
+
+    norms = np.linalg.norm(np.array(vectors, dtype="float32"), axis=1)
+    if not np.allclose(norms, 1.0, atol=UNIT_NORM_ATOL):
+        raise ValueError(
+            "Embedding vectors are not unit-norm (max deviation "
+            f"{np.max(np.abs(norms - 1.0)):.4f}). FAISS's L2 index and Qdrant's "
+            "cosine index only rank identically when vectors are unit-norm - "
+            "an unnormalised embedding model would silently desync the two "
+            "stores' rankings instead of erroring, hence this check."
+        )
+
     embeddings = GeminiEmbeddings()  # kept on the store for query-time embed_query
 
     index = faiss.IndexHNSWFlat(len(vectors[0]), HNSW_M)
@@ -40,8 +69,21 @@ def build_index(chunks: list[Document], vectors: list[list[float]]) -> FAISS:
 
 
 def save_index(index: FAISS) -> None:
+    """Write the index to a temp directory, then move both files into place.
+
+    save_local() writes the .faiss and .pkl files as two separate calls; an
+    interrupt between them would leave the pair desynced (one stale, one
+    fresh) with nothing to detect it. Building in a temp dir and moving the
+    finished pair in as a batch keeps the swap atomic from the caller's view.
+    """
     config.FAISS_INDEX_DIR.mkdir(parents=True, exist_ok=True)
-    index.save_local(str(config.FAISS_INDEX_DIR), index_name=INDEX_NAME)
+    with tempfile.TemporaryDirectory(dir=config.FAISS_INDEX_DIR) as tmp_dir:
+        index.save_local(tmp_dir, index_name=INDEX_NAME)
+        for suffix in (".faiss", ".pkl"):
+            os.replace(
+                os.path.join(tmp_dir, INDEX_NAME + suffix),
+                config.FAISS_INDEX_DIR / (INDEX_NAME + suffix),
+            )
 
 
 def load_index() -> FAISS:

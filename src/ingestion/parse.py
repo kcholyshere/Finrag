@@ -1,3 +1,6 @@
+import hashlib
+import json
+
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -6,12 +9,37 @@ from docling_core.types.doc.document import DoclingDocument, PictureItem, TableI
 from src import config
 
 DOCLING_JSON_PATH = config.INTERIM_DIR / "ifc-annual-report-2024-financials.docling.json"
+DOCLING_META_PATH = DOCLING_JSON_PATH.with_suffix(".meta.json")
+
+# Options that change parse output; parse_pdf() builds PdfPipelineOptions from
+# this same dict so the cache-validity check can never drift from the options
+# actually used.
+PARSE_OPTIONS = {"generate_picture_images": True, "images_scale": 2.0}
+
+
+def _cache_meta() -> dict:
+    return {"pdf_sha1": hashlib.sha1(config.PDF_PATH.read_bytes()).hexdigest(), **PARSE_OPTIONS}
+
+
+def _cache_status(meta_path, current: dict) -> str:
+    """Returns 'valid', 'missing', or 'stale' against a sidecar meta file -
+    existence-only caches (the previous behaviour here) already forced one
+    manual cache-bust when images_scale changed (see ADR log), so a
+    version+hash check replaces "hope nothing changed" with an explicit
+    comparison."""
+    if not meta_path.exists():
+        return "missing"
+    return "valid" if json.loads(meta_path.read_text()) == current else "stale"
+
+
+def _write_meta(meta_path, current: dict) -> None:
+    meta_path.write_text(json.dumps(current, indent=2))
 
 
 def parse_pdf() -> DoclingDocument:
     # Picture images are off by default and Phase 5.2 needs the pixels for
     # captioning; scale 2 keeps small chart labels legible for the vision model.
-    pipeline_options = PdfPipelineOptions(generate_picture_images=True, images_scale=2.0)
+    pipeline_options = PdfPipelineOptions(**PARSE_OPTIONS)
     converter = DocumentConverter(
         format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
     )
@@ -20,13 +48,27 @@ def parse_pdf() -> DoclingDocument:
 
     DOCLING_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
     document.save_as_json(DOCLING_JSON_PATH)
+    _write_meta(DOCLING_META_PATH, _cache_meta())
     return document
 
 
 def load_or_parse_pdf() -> DoclingDocument:
-    if DOCLING_JSON_PATH.exists():
-        return DoclingDocument.load_from_json(DOCLING_JSON_PATH)
-    return parse_pdf()
+    if not DOCLING_JSON_PATH.exists():
+        return parse_pdf()
+
+    current = _cache_meta()
+    status = _cache_status(DOCLING_META_PATH, current)
+    if status == "stale":
+        print(
+            f"Parse cache at {DOCLING_JSON_PATH} no longer matches the source PDF "
+            "or parse options - re-parsing"
+        )
+        return parse_pdf()
+    if status == "missing":
+        print(f"No cache metadata found for {DOCLING_JSON_PATH.name}, grandfathering existing cache")
+        _write_meta(DOCLING_META_PATH, current)
+
+    return DoclingDocument.load_from_json(DOCLING_JSON_PATH)
 
 
 def _build_item_to_section(document: DoclingDocument) -> dict[str, str | None]:

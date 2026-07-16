@@ -14,7 +14,6 @@ GCP_LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "global")
 # Models
 GEMINI_MODEL = "gemini-3.5-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
-EMBEDDING_DIMENSIONS = 3072
 
 # Phase 6 ColPali-like pipeline. If ColQwen2 proves too slow on MPS, swap to
 # "vidore/colSmol-500M" - same colpali-engine API, one-line change (cached
@@ -59,8 +58,3 @@ CURATED_EVAL_PATH = PROJECT_ROOT / "references" / "RAG_evaluation_dataset.csv"
 EVAL_DATASET_PATH = PROCESSED_DIR / "eval_dataset.csv"
 EVAL_RUNS_DIR = PROCESSED_DIR / "eval_runs"
 EVAL_DATASET_TARGET_SIZE = 200
-
-# Langfuse
-LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
-LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY")
-LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY")

@@ -1,5 +1,6 @@
 from collections.abc import Iterator
 
+import httpx
 from google.genai import errors, types
 from langchain_core.documents import Document
 from langfuse import observe
@@ -96,10 +97,18 @@ def _build_contents(query: str, context_docs: list[Document]) -> list:
     return [prompt, *image_parts]
 
 
+# google-genai's own internal retry logic (_api_client.retry_args) treats
+# httpx.TimeoutException and httpx.ConnectError as retriable alongside 5xx
+# APIErrors - a pre-first-chunk connection drop or timeout raises one of these
+# httpx types directly, not a ServerError, so it needs the same treatment here.
+_RETRIABLE_PRE_CHUNK_ERRORS = (errors.ServerError, httpx.TimeoutException, httpx.ConnectError)
+
+
 def _stream_turn(client, contents: list) -> Iterator:
     """Yield chunks for one model turn, retrying once if the endpoint fails with
-    a 5xx before any chunk arrives. Mid-stream failures re-raise instead -
-    retrying those would replay tokens the user has already seen.
+    a 5xx or a connection/timeout error before any chunk arrives. Mid-stream
+    failures re-raise instead - retrying those would replay tokens the user
+    has already seen.
     """
     for attempts_left in (1, 0):
         received = False
@@ -110,7 +119,7 @@ def _stream_turn(client, contents: list) -> Iterator:
                 received = True
                 yield chunk
             return
-        except errors.ServerError:
+        except _RETRIABLE_PRE_CHUNK_ERRORS:
             if received or not attempts_left:
                 raise
 
@@ -153,6 +162,15 @@ def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
                 ],
             )
         )
+
+    # Loop only exits without returning when MAX_TOOL_TURNS is exhausted while
+    # the model still has a pending function call - without this, the
+    # generator just stops, leaving the user with a truncated answer and no
+    # indication anything went wrong.
+    yield (
+        "\n\nI was unable to finish the calculation needed to answer this "
+        "question fully - please try rephrasing it or asking a narrower question."
+    )
 
 
 def generate_answer(query: str, context_docs: list[Document]) -> str:

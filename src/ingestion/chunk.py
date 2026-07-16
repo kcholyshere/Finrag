@@ -1,4 +1,5 @@
 import json
+from functools import lru_cache
 
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -26,7 +27,10 @@ def group_into_sections(records: list[dict]) -> list[dict]:
             sections.append(current)
         else:
             current["text"] += "\n" + record["text"]
-            current["end_page"] = record["page"]
+            # A record with no page (e.g. an item Docling couldn't place) must
+            # never overwrite an already-known end_page with None.
+            if record["page"] is not None:
+                current["end_page"] = record["page"]
 
     for section in sections:
         section.setdefault("end_page", section["start_page"])
@@ -118,7 +122,14 @@ def save_chunks(chunks: list[Document]) -> None:
             f.write(json.dumps(record) + "\n")
 
 
+@lru_cache(maxsize=1)
 def load_chunks() -> list[Document]:
+    # Cached because retrieve_reranked's structural-candidate helpers
+    # (retriever.py) call this up to twice per query, each re-parsing the
+    # full JSONL from disk. Safe within one process: nothing writes
+    # chunks.jsonl and then calls load_chunks() expecting fresh data in the
+    # same run (dataset.py holds chunks in memory across a rebuild instead of
+    # re-reading them back).
     chunks = []
     with open(CHUNKS_PATH) as f:
         for line in f:
