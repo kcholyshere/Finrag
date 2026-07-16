@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import fitz
@@ -25,7 +26,11 @@ def render_page_images() -> list[Path]:
             path = PAGE_IMAGES_DIR / f"page_{page_no:04d}.png"
             if not path.exists():
                 pixmap = page.get_pixmap(dpi=PAGE_IMAGE_DPI)
-                pixmap.save(path)
+                # Write-temp-then-replace: a direct save left half-written on
+                # interrupt would pass this exists() check forever (A10).
+                tmp_path = path.with_suffix(".tmp.png")
+                pixmap.save(tmp_path)
+                os.replace(tmp_path, path)
             paths.append(path)
 
     return paths

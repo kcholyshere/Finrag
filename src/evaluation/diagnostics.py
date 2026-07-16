@@ -60,6 +60,20 @@ def parse_chunk_coverage(eval_df: pd.DataFrame, chunks: list[Document]) -> dict:
     }
 
 
+def _hits_page_range(doc: Document, page_numbers: set[int]) -> bool:
+    """A doc hits if any ground-truth page falls within its inclusive start_page..end_page
+    span, not just at the endpoints - a sub-chunk tagged pages 10-12 should count for a
+    page-11 question (see audit finding A2).
+    """
+    start_page = doc.metadata.get("start_page")
+    end_page = doc.metadata.get("end_page")
+    if start_page is None and end_page is None:
+        return False
+    start_page = start_page if start_page is not None else end_page
+    end_page = end_page if end_page is not None else start_page
+    return any(start_page <= page <= end_page for page in page_numbers)
+
+
 def hit_rate_and_mrr(samples: list[EvalSample], k: int) -> dict:
     """Hit Rate@k / MRR@k using the ground-truth page number as the relevance label -
     the measurable proxy for embedding/retrieval quality, since embeddings themselves
@@ -75,7 +89,7 @@ def hit_rate_and_mrr(samples: list[EvalSample], k: int) -> dict:
             ranks = [
                 rank
                 for rank, doc in enumerate(sample.retrieved_docs[:k], start=1)
-                if {doc.metadata.get("start_page"), doc.metadata.get("end_page")} & sample.page_numbers
+                if _hits_page_range(doc, sample.page_numbers)
             ]
             if ranks:
                 hits += 1
@@ -130,6 +144,11 @@ def run_ragas_metrics(samples: list[EvalSample], context_based: bool = True) -> 
     the docs' page_content is only a path placeholder - scoring precision/
     recall/faithfulness against it would measure a string the model never saw.
     Page-based hit rate/MRR covers the retrieval step for that pipeline instead.
+
+    Returns {metric_name: {"mean": float, "count": int} | None} - count is the
+    number of non-NaN rows the mean was actually computed over (RAGAS drops rows
+    it can't score), so a low count isn't masked by an otherwise-normal-looking
+    mean. Skipped metrics stay None rather than a dict of Nones.
     """
     from ragas import evaluate
     from ragas.metrics import AnswerCorrectness, AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
@@ -150,6 +169,12 @@ def run_ragas_metrics(samples: list[EvalSample], context_based: bool = True) -> 
         embeddings=ragas_compat.get_ragas_embeddings(),
         show_progress=False,
     )
-    scores = result.to_pandas()[list(metrics)].mean().to_dict()
+    computed = result.to_pandas()[list(metrics)]
+    # mean() silently skips NaN rows - record how many rows actually scored
+    # alongside each mean, so two runs can't claim the same n while one quietly
+    # graded fewer rows (audit finding A8).
+    means = computed.mean().to_dict()
+    counts = computed.count().to_dict()
+    scores = {column: {"mean": means[column], "count": int(counts[column])} for column in metrics}
     all_columns = ["context_precision", "context_recall", "faithfulness", "answer_relevancy", "answer_correctness"]
     return {column: scores.get(column) for column in all_columns}

@@ -6,6 +6,7 @@ late-interaction (MaxSim) retrieval. Runs locally - the model never sees the
 network after the initial weights download.
 """
 
+import os
 import threading
 from collections.abc import Iterator
 from functools import lru_cache
@@ -46,6 +47,18 @@ def _cache_path(page_no: int) -> Path:
     return config.COLPALI_EMBEDDINGS_DIR / f"page_{page_no:04d}.npy"
 
 
+def _atomic_np_save(path: Path, array: np.ndarray) -> None:
+    """Write-temp-then-replace so an interrupted save can't leave a truncated
+    .npy that passes the cache's existence check forever (audit finding A10).
+    The temp name must already end in .npy - np.save appends the suffix only
+    when it's missing, so a bare ".tmp" temp name would land as ".tmp.npy" and
+    os.replace would then miss it.
+    """
+    tmp_path = path.with_name(f"{path.stem}.tmp.npy")
+    np.save(tmp_path, array)
+    os.replace(tmp_path, path)
+
+
 def _embed_image_batch(paths: list[Path]) -> list[np.ndarray]:
     with _MODEL_LOCK:
         model, processor = _load_model_and_processor()
@@ -73,7 +86,7 @@ def embed_page_images(paths: list[Path]) -> Iterator[tuple[int, np.ndarray]]:
     for start in range(0, len(uncached), BATCH_SIZE):
         batch_paths = uncached[start : start + BATCH_SIZE]
         for path, embedding in zip(batch_paths, _embed_image_batch(batch_paths)):
-            np.save(_cache_path(int(path.stem.split("_")[1])), embedding)
+            _atomic_np_save(_cache_path(int(path.stem.split("_")[1])), embedding)
 
     for path in paths:
         page_no = int(path.stem.split("_")[1])
