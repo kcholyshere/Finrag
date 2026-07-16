@@ -1,6 +1,6 @@
 # Eval results comparison
 
-FAISS backend only, same 200-row eval set, `k=4`. Each column adds exactly one component on top of the previous one (additive ladder), not an isolated A/B.
+FAISS backend only, same 200-row eval set, `k=4`. Each column adds exactly one component on top of the previous one (additive ladder), not an isolated A/B. The Phase 6 ColPali pipeline is a retrieval/generation swap rather than an added component, so it is compared against the final ladder stage in its own section below instead of as a ladder column.
 
 > Maintenance rule: every time the eval benchmark is run, add the result to the table below and update the diff/notes for that stage - don't let this doc drift out of sync with `data/processed/eval_runs/`.
 
@@ -67,6 +67,41 @@ Status after the 2026-07-13 retrievability fixes (root cause and fix documented 
 | +Images | 1.000 | 0.833 |
 
 Before Phase 5.2 the index held no image content at all - image-typed questions scored against text chunks from the same pages (the labels are page-based), which is why the pre-images hit rate wasn't zero. With caption chunks indexed, all 6 image questions now retrieve a correct-page chunk in the top 4. The 2 combination (image and text) questions stay at 0.5/0.5 - multi-part questions needing both modalities in one top-4 window remain the hard case, same pattern as the table-and-text combinations.
+
+## Phase 6: ColPali page-image pipeline vs the final ladder stage (2026-07-16)
+
+Not a ladder column: ColPali replaces the whole retrieval + context representation (ColQwen2 patch embeddings over 147 page images, Qdrant-native MaxSim, top-k whole pages fed to Gemini as PNGs) instead of adding a component on top of the chunk pipeline. Backend is Qdrant by necessity (multivector support); the baseline column is the +Images stage above (FAISS, hybrid + reranked chunks).
+
+| Metric | +Images (Phase 5.2, chunks) | ColPali (Phase 6, pages) | Delta |
+|---|---|---|---|
+| Hit Rate@4 | 0.935 | 0.925 | -0.010 |
+| MRR@4 | 0.8629 | 0.8021 | -0.0608 |
+| context_precision | 0.8766 | n/a | - |
+| context_recall | 0.9246 | n/a | - |
+| faithfulness | 0.7184 | n/a | - |
+| answer_relevancy | 0.8784 | 0.8751 | -0.0033 |
+| answer_correctness | 0.7073 | 0.6543 | -0.0530 |
+
+n/a: the context-grounded RAGAS metrics score retrieved text, but this pipeline's generator answers from page pixels - the docs' page_content is a path placeholder the model never sees, so scoring it would measure nothing real. Retrieval quality is covered by the page-based Hit Rate/MRR (the ground-truth labels are page numbers, so they work identically for both pipelines).
+
+Per-content-type Hit Rate@4 (MRR@4 in parentheses):
+
+| Subset | +Images (chunks) | ColPali (pages) |
+|---|---|---|
+| table (n=9) | 0.667 (0.667) | 0.778 (0.611) |
+| image (n=6) | 1.000 (0.833) | 0.833 (0.750) |
+| text (n=176) | 0.949 (0.887) | 0.943 (0.819) |
+
+Reading:
+
+- Single-stage retrieval nearly matches the tuned three-stage pipeline. One local VLM with no OCR, no parsing, no table summaries, no captions, no BM25, no cross-encoder lands within 0.01 Hit Rate of a pipeline that took four phases of tuning. That is the headline ColPali result, and it matches the literature's pitch.
+- Tables are ColPali's win (0.667 -> 0.778): it retrieves the page where the table is visible, sidestepping the text pipeline's core struggle (markdown walls of numbers matching question-shaped queries) that ADR-0007's enrichment only partly fixed. The one earlier 10-question spot check showing ColPali winning ("charges on borrowings" at rank 1) generalises.
+- Images flip the other way (1.000 -> 0.833): the caption pipeline was tuned for exactly those 6 questions (figure-bearing captions), while ColPali must rank the right chart page among many visually similar chart pages.
+- The end-to-end gap is generation, not retrieval: retrieval is near-parity (-0.01 hit rate) but answer_correctness drops -0.053. Reading precise figures off a 150-DPI page render is harder than reading them from extracted markdown/captions, and each retrieved page carries a full page of distractor content. Curated text remains the better generation substrate; pages are the better retrieval substrate for visually-structured content.
+- MRR@4 (-0.061) is the honest cost of dropping the cross-encoder: ColPali finds the right page but ranks it top-of-list less often.
+- Operational trade-offs (not in the table): ColPali indexing is one ~10 min local batch (no Vertex calls, no enrichment prompts to maintain) vs the multi-step parse/summarise/caption/rebuild chain; but query-time needs a ~5GB local VLM and a MaxSim pass (~1-2s) vs a cheap embedding call, and generation ships ~4 PNG pages per question to Gemini instead of ~4 KB-sized text chunks.
+
+Source file: `data/processed/eval_runs/2026-07-16T11-18-25.243270+00-00_qdrant_colpali_k4.json`. Run notes: 200/200 samples, zero retries; run twice after a first attempt crashed on a thread-safety bug (six eval workers concurrently cold-loading the VLM - fixed by widening the model lock in `colpali_embedder.py`).
 
 ## Faithfulness experiments
 

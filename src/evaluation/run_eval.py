@@ -29,7 +29,13 @@ from src.evaluation import diagnostics
 from src.evaluation.diagnostics import EvalSample
 from src.generation.answer import generate_answer
 from src.ingestion.chunk import load_chunks
-from src.retrieval.retriever import Backend, retrieve, retrieve_hybrid, retrieve_reranked
+from src.retrieval.retriever import (
+    Backend,
+    retrieve,
+    retrieve_colpali,
+    retrieve_hybrid,
+    retrieve_reranked,
+)
 
 MAX_WORKERS = 6
 
@@ -37,8 +43,14 @@ MAX_WORKERS = 6
 # blip is expected, and one lost sample shouldn't cost the whole run.
 SAMPLE_ATTEMPTS = 3
 
-RetrievalMode = Literal["dense", "hybrid", "reranked"]
-RETRIEVE_FNS = {"dense": retrieve, "hybrid": retrieve_hybrid, "reranked": retrieve_reranked}
+RetrievalMode = Literal["dense", "hybrid", "reranked", "colpali"]
+RETRIEVE_FNS = {
+    "dense": retrieve,
+    "hybrid": retrieve_hybrid,
+    "reranked": retrieve_reranked,
+    # Page-image late interaction (Phase 6); Qdrant-only, so backend is ignored.
+    "colpali": lambda query, backend, k: retrieve_colpali(query, k=k),
+}
 
 
 def _build_sample(row: pd.Series, backend: Backend, k: int, retrieval_mode: RetrievalMode) -> EvalSample:
@@ -81,6 +93,9 @@ def run(
     n: int | None = None,
     retrieval_mode: RetrievalMode = "dense",
 ) -> dict:
+    if retrieval_mode == "colpali":
+        backend = "qdrant"  # the page-image collection only exists in Qdrant
+
     eval_df = pd.read_csv(config.EVAL_DATASET_PATH)
     if n is not None:
         eval_df = eval_df.sample(n=n, random_state=0)
@@ -98,9 +113,15 @@ def run(
     print("Computing retrieval rank metrics (Hit Rate@k / MRR)...")
     rank_metrics = diagnostics.hit_rate_and_mrr(samples, k)
 
-    print("Computing RAGAS metrics (context_precision, context_recall, faithfulness, "
-          "answer_relevancy, answer_correctness)...")
-    ragas_metrics = diagnostics.run_ragas_metrics(samples)
+    # ColPali answers from page images; the context-grounded RAGAS metrics would
+    # score placeholder strings the model never saw, so they are reported as
+    # None (page-based hit rate/MRR covers retrieval for that pipeline).
+    context_based = retrieval_mode != "colpali"
+    print("Computing RAGAS metrics "
+          + ("(context_precision, context_recall, faithfulness, answer_relevancy, "
+             "answer_correctness)..." if context_based
+             else "(answer_relevancy, answer_correctness; context metrics N/A)..."))
+    ragas_metrics = diagnostics.run_ragas_metrics(samples, context_based=context_based)
 
     result = {
         "settings": {
@@ -111,7 +132,9 @@ def run(
             "chunk_size": config.CHUNK_SIZE,
             "chunk_overlap": config.CHUNK_OVERLAP,
             "gemini_model": config.GEMINI_MODEL,
-            "embedding_model": config.EMBEDDING_MODEL,
+            "embedding_model": (
+                config.COLPALI_MODEL if retrieval_mode == "colpali" else config.EMBEDDING_MODEL
+            ),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         },
         "diagnostics": {
@@ -147,7 +170,7 @@ if __name__ == "__main__":
     parser.add_argument("--k", type=int, default=4)
     parser.add_argument("--n", type=int, default=None, help="Sample size for a quick smoke test")
     parser.add_argument(
-        "--retrieval-mode", choices=["dense", "hybrid", "reranked"], default="dense"
+        "--retrieval-mode", choices=["dense", "hybrid", "reranked", "colpali"], default="dense"
     )
     args = parser.parse_args()
 

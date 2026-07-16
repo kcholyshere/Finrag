@@ -107,14 +107,15 @@ def to_ragas_dataset(samples: list[EvalSample]):
     )
 
 
-def run_ragas_metrics(samples: list[EvalSample]) -> dict:
-    """Runs every RAGAS metric (retrieval, generation, and outcome) in a single
+def run_ragas_metrics(samples: list[EvalSample], context_based: bool = True) -> dict:
+    """Runs the RAGAS metrics (retrieval, generation, and outcome) in a single
     `evaluate()` call.
 
     Must be one call: ragas tears down its internal asyncio event loop after each
     `evaluate()` returns, and the cached ChatVertexAI's grpc.aio channel is bound to
     the loop it was first used on - a second `evaluate()` call in the same process
-    silently returns NaN for every row once that loop is closed.
+    silently returns NaN for every row once that loop is closed. (A single call
+    with a metric subset is fine - the trap is a second call.)
 
     - context_precision / context_recall: are the actually-retrieved contexts
       sufficient and precise for supporting the reference answer? (retrieval step)
@@ -123,17 +124,32 @@ def run_ragas_metrics(samples: list[EvalSample]) -> dict:
     - answer_correctness: does the final answer match the reference answer?
       (end-to-end outcome, and RAGAS's own LLM-graded scoring is the "LLM-as-judge"
       experiment the Phase 2 requirements ask for)
+
+    context_based=False (ColPali pipeline) skips the three context-grounded
+    metrics and reports them as None: the model answers from page images, and
+    the docs' page_content is only a path placeholder - scoring precision/
+    recall/faithfulness against it would measure a string the model never saw.
+    Page-based hit rate/MRR covers the retrieval step for that pipeline instead.
     """
     from ragas import evaluate
     from ragas.metrics import AnswerCorrectness, AnswerRelevancy, ContextPrecision, ContextRecall, Faithfulness
 
-    dataset = to_ragas_dataset(samples)
+    metrics = {"answer_relevancy": AnswerRelevancy(), "answer_correctness": AnswerCorrectness()}
+    if context_based:
+        metrics = {
+            "context_precision": ContextPrecision(),
+            "context_recall": ContextRecall(),
+            "faithfulness": Faithfulness(),
+            **metrics,
+        }
+
     result = evaluate(
-        dataset=dataset,
-        metrics=[ContextPrecision(), ContextRecall(), Faithfulness(), AnswerRelevancy(), AnswerCorrectness()],
+        dataset=to_ragas_dataset(samples),
+        metrics=list(metrics.values()),
         llm=ragas_compat.get_ragas_llm(),
         embeddings=ragas_compat.get_ragas_embeddings(),
         show_progress=False,
     )
-    columns = ["context_precision", "context_recall", "faithfulness", "answer_relevancy", "answer_correctness"]
-    return result.to_pandas()[columns].mean().to_dict()
+    scores = result.to_pandas()[list(metrics)].mean().to_dict()
+    all_columns = ["context_precision", "context_recall", "faithfulness", "answer_relevancy", "answer_correctness"]
+    return {column: scores.get(column) for column in all_columns}

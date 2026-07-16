@@ -6,6 +6,7 @@ late-interaction (MaxSim) retrieval. Runs locally - the model never sees the
 network after the initial weights download.
 """
 
+import threading
 from collections.abc import Iterator
 from functools import lru_cache
 from pathlib import Path
@@ -17,6 +18,13 @@ from PIL import Image
 from src import config
 
 BATCH_SIZE = 2  # 2B-param VLM on 18GB unified memory - keep forward passes small
+
+# The eval harness calls embed_query from a thread pool; serialise everything
+# that touches the model - concurrent inference on one MPS model is neither
+# safe nor faster, and lru_cache does not serialise a concurrent first miss,
+# so an unguarded cold start loads one ~5GB model per thread (observed as
+# RuntimeErrors on every eval sample until the machine ran out of memory).
+_MODEL_LOCK = threading.Lock()
 
 
 def _device() -> str:
@@ -39,14 +47,15 @@ def _cache_path(page_no: int) -> Path:
 
 
 def _embed_image_batch(paths: list[Path]) -> list[np.ndarray]:
-    model, processor = _load_model_and_processor()
-    images = [Image.open(path) for path in paths]
-    batch = processor.process_images(images).to(model.device)
-    with torch.no_grad():
-        embeddings = model(**batch)
-    # fp16 halves the cache size; the ~3-decimal precision loss is irrelevant
-    # to MaxSim ranking.
-    return [e.to(torch.float16).cpu().numpy() for e in embeddings]
+    with _MODEL_LOCK:
+        model, processor = _load_model_and_processor()
+        images = [Image.open(path) for path in paths]
+        batch = processor.process_images(images).to(model.device)
+        with torch.no_grad():
+            embeddings = model(**batch)
+        # fp16 halves the cache size; the ~3-decimal precision loss is
+        # irrelevant to MaxSim ranking.
+        return [e.to(torch.float16).cpu().numpy() for e in embeddings]
 
 
 def embed_page_images(paths: list[Path]) -> Iterator[tuple[int, np.ndarray]]:
@@ -73,8 +82,9 @@ def embed_page_images(paths: list[Path]) -> Iterator[tuple[int, np.ndarray]]:
 
 def embed_query(text: str) -> np.ndarray:
     """Embed a query into its token-level matrix (n_tokens x 128) for MaxSim."""
-    model, processor = _load_model_and_processor()
-    batch = processor.process_queries([text]).to(model.device)
-    with torch.no_grad():
-        embeddings = model(**batch)
-    return embeddings[0].to(torch.float32).cpu().numpy()
+    with _MODEL_LOCK:
+        model, processor = _load_model_and_processor()
+        batch = processor.process_queries([text]).to(model.device)
+        with torch.no_grad():
+            embeddings = model(**batch)
+        return embeddings[0].to(torch.float32).cpu().numpy()
