@@ -92,6 +92,45 @@ def retrieve_hybrid(
     return ensemble.invoke(query)
 
 
+@observe(as_type="retriever")
+def retrieve_colpali(query: str, k: int = 4) -> list[Document]:
+    """Rank whole pages by ColQwen2 late interaction (Phase 6 pipeline).
+
+    Qdrant scores the query's token matrix against each page's patch matrix
+    with its native MAX_SIM comparator server-side - no reranker or hybrid
+    layering on top, late interaction is the ranking mechanism. Documents
+    carry the page image path in metadata; the pixels, not page_content, are
+    what generation consumes downstream.
+    """
+    # Heavy torch/VLM stack - imported here so the text pipeline (Streamlit
+    # app, eval harness) can import this module without loading it.
+    from src.embedding.colpali_embedder import embed_query
+
+    result = qdrant_store.get_client().query_points(
+        collection_name=config.QDRANT_COLPALI_COLLECTION,
+        query=embed_query(query).tolist(),
+        limit=k,
+        with_payload=True,
+    )
+    return [
+        Document(
+            page_content=(
+                f"Page image: {point.payload['image_path']} "
+                f"(printed page {config.display_page(point.payload['page_no'])})"
+            ),
+            metadata={
+                "content_type": "page_image",
+                "start_page": point.payload["page_no"],
+                "end_page": point.payload["page_no"],
+                "image_path": point.payload["image_path"],
+                "source_pdf": point.payload["source_pdf"],
+                "score": point.score,
+            },
+        )
+        for point in result.points
+    ]
+
+
 _TABLE_REFERENCE_PATTERN = re.compile(r"\btable\s+(\d+)\b", re.IGNORECASE)
 
 

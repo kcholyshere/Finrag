@@ -16,3 +16,4 @@ ragas
 langchain-google-vertexai
 rapidfuzz
 pymupdf
+colpali-engine

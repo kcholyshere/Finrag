@@ -16,6 +16,12 @@ GEMINI_MODEL = "gemini-3.5-flash"
 EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMENSIONS = 3072
 
+# Phase 6 ColPali-like pipeline. If ColQwen2 proves too slow on MPS, swap to
+# "vidore/colSmol-500M" - same colpali-engine API, one-line change (cached
+# embeddings under COLPALI_EMBEDDINGS_DIR must be regenerated).
+COLPALI_MODEL = "vidore/colqwen2-v1.0"
+COLPALI_EMBEDDING_DIMENSIONS = 128
+
 # Source document
 PDF_PATH = PROJECT_ROOT / "references" / "ifc-annual-report-2024-financials.pdf"
 
@@ -35,6 +41,7 @@ def display_page(raw_page_no: int | None) -> int | None:
 # Ingestion pipeline data
 INTERIM_DIR = PROJECT_ROOT / "data" / "interim"
 PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+COLPALI_EMBEDDINGS_DIR = INTERIM_DIR / "colpali_embeddings"
 
 # Chunking
 CHUNK_SIZE = 1000
@@ -45,6 +52,7 @@ FAISS_INDEX_DIR = PROJECT_ROOT / "models" / "faiss"
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 QDRANT_COLLECTION = "ifc_annual_report_2024"
+QDRANT_COLPALI_COLLECTION = "ifc_annual_report_2024_colpali"
 
 # Evaluation (Phase 2)
 CURATED_EVAL_PATH = PROJECT_ROOT / "references" / "RAG_evaluation_dataset.csv"
