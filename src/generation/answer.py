@@ -4,10 +4,14 @@ from google.genai import errors, types
 from langchain_core.documents import Document
 from langfuse import observe
 
+from typing import Literal
+
 from src import config
 from src.generation.calculator import calculate
-from src.retrieval.retriever import Backend, retrieve_reranked
+from src.retrieval.retriever import Backend, retrieve_colpali, retrieve_reranked
 from src.services.genai_client import get_client
+
+Pipeline = Literal["text", "colpali"]
 
 SYSTEM_PROMPT = (
     "You are a financial analyst assistant answering questions about the IFC "
@@ -17,7 +21,10 @@ SYSTEM_PROMPT = (
     "before quoting or calculating a figure. Context marked 'type: image' is a "
     "textual description of a chart or graph from the report - treat its stated "
     "values and trends as report data, but note figures read off a chart may be "
-    "approximate. When a question needs arithmetic "
+    "approximate. Context may also include full report pages as images - read "
+    "text, tables, and charts directly off the page image, applying the same "
+    "column/row care to tables, and cite the printed page numbers given for each "
+    "image. When a question needs arithmetic "
     "(differences, percentage changes, ratios), call the calculate tool with the "
     "figures from the context rather than computing mentally. Never mention tools, "
     "function calls, or your reasoning process in the answer - answer directly. "
@@ -50,14 +57,39 @@ def _run_calculate(args: dict) -> dict:
         return {"error": str(exc)}
 
 
-def _build_prompt(query: str, context_docs: list[Document]) -> str:
-    context = "\n\n".join(
+def _build_contents(query: str, context_docs: list[Document]) -> list:
+    """Assemble the Gemini contents list from mixed text and page-image context.
+
+    Text/table/caption docs become the flat text prompt used since Phase 1;
+    page_image docs (ColPali pipeline) are attached as inline PNG parts, with a
+    label line in the prompt tying each image to its printed page number so
+    citations survive the trip through the model.
+    """
+    text_docs = [d for d in context_docs if d.metadata.get("content_type") != "page_image"]
+    page_docs = [d for d in context_docs if d.metadata.get("content_type") == "page_image"]
+
+    context_blocks = [
         f"[Source: page {config.display_page(d.metadata.get('start_page'))}, "
         f"section '{d.metadata.get('section')}', type: {d.metadata.get('content_type')}]\n"
         f"{d.page_content}"
-        for d in context_docs
-    )
-    return f"{SYSTEM_PROMPT}\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+        for d in text_docs
+    ]
+    context_blocks += [
+        f"[Image {i}: full page image, printed page "
+        f"{config.display_page(d.metadata.get('start_page'))}]"
+        for i, d in enumerate(page_docs, start=1)
+    ]
+    context = "\n\n".join(context_blocks)
+    prompt = f"{SYSTEM_PROMPT}\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:"
+
+    image_parts = [
+        types.Part.from_bytes(
+            data=(config.PROJECT_ROOT / d.metadata["image_path"]).read_bytes(),
+            mime_type="image/png",
+        )
+        for d in page_docs
+    ]
+    return [prompt, *image_parts]
 
 
 def _stream_turn(client, contents: list) -> Iterator:
@@ -82,7 +114,7 @@ def _stream_turn(client, contents: list) -> Iterator:
 @observe(as_type="generation")
 def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
     client = get_client()
-    contents: list = [_build_prompt(query, context_docs)]
+    contents: list = _build_contents(query, context_docs)
 
     for _ in range(MAX_TOOL_TURNS):
         function_calls = []
@@ -95,7 +127,9 @@ def stream_answer(query: str, context_docs: list[Document]) -> Iterator[str]:
                     model_parts.append(part)
                     # Thought parts are internal reasoning - keep them in the
                     # history (their signatures are required) but never show them.
-                    if part.text and not part.thought:
+                    # "turn_to_user" is a Gemini-internal action token observed
+                    # leaking once as literal answer text (2026-07-16) - drop it.
+                    if part.text and not part.thought and part.text.strip() != "turn_to_user":
                         yield part.text
 
         if not function_calls:
@@ -123,13 +157,17 @@ def generate_answer(query: str, context_docs: list[Document]) -> str:
 
 @observe(name="rag_query")
 def answer_query(
-    query: str, backend: Backend = "faiss", k: int = 4
+    query: str, backend: Backend = "faiss", k: int = 4, pipeline: Pipeline = "text"
 ) -> tuple[list[Document], Iterator[str]]:
     """Single traced entry point: retrieval and generation nest under one Langfuse trace.
 
     Returns the retrieved docs (for display) alongside the streaming answer.
-    Uses the strongest retrieval pipeline (hybrid + cross-encoder reranking) -
-    plain dense retrieve() remains available for comparisons and evaluation.
+    "text" uses the strongest chunk pipeline (hybrid + cross-encoder reranking);
+    "colpali" retrieves whole pages by late interaction and sends their images
+    to the model (backend is ignored - the page collection is Qdrant-only).
     """
-    context_docs = retrieve_reranked(query, backend=backend, k=k)
+    if pipeline == "colpali":
+        context_docs = retrieve_colpali(query, k=k)
+    else:
+        context_docs = retrieve_reranked(query, backend=backend, k=k)
     return context_docs, stream_answer(query, context_docs)
