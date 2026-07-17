@@ -147,10 +147,11 @@ python -m src.evaluation.run_eval --backend faiss --k 4 --retrieval-mode reranke
 `--retrieval-mode` accepts `dense`, `hybrid`, `reranked`, or `colpali` (forces
 `backend=qdrant`). `--n` runs a smaller sample for a quick smoke test.
 
-Run the app locally:
+Run the app locally (the `-m` form matters: it puts the repo root on the
+module path so `src` imports resolve - bare `streamlit run` does not):
 
 ```bash
-streamlit run src/ui/app.py
+python -m streamlit run src/ui/app.py
 ```
 
 Or via Docker (Streamlit on `localhost:8503`, mounting the host's Vertex AI
