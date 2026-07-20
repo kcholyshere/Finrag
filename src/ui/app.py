@@ -65,9 +65,12 @@ with st.sidebar:
         backend = "qdrant"
         st.caption("Page-image retrieval runs on Qdrant (native MaxSim).")
         k = st.slider("Pages to retrieve", min_value=1, max_value=6, value=4)
+        metadata_filter = None
     else:
         backend = st.selectbox("Vector store backend", ["faiss", "qdrant"])
         k = st.slider("Chunks to retrieve", min_value=2, max_value=10, value=4)
+        content_type = st.selectbox("Content type filter", ["All", "text", "table", "image"])
+        metadata_filter = None if content_type == "All" else {"content_type": content_type}
 
 query = st.text_input(
     "Ask a question about the IFC Annual Report 2024",
@@ -79,7 +82,9 @@ if query:
     # Streamlit renders the raw traceback, which reads as an app crash.
     try:
         with st.spinner("Retrieving relevant context..."):
-            docs, tokens = answer_query(query, backend=backend, k=k, pipeline=pipeline)
+            docs, tokens = answer_query(
+                query, backend=backend, k=k, pipeline=pipeline, metadata_filter=metadata_filter
+            )
 
         st.subheader("Answer")
         answer_placeholder = st.empty()

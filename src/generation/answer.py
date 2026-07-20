@@ -5,11 +5,11 @@ from google.genai import errors, types
 from langchain_core.documents import Document
 from langfuse import observe
 
-from typing import Literal
+from typing import Literal, Optional
 
 from src import config
 from src.generation.calculator import calculate
-from src.retrieval.retriever import Backend, retrieve_colpali, retrieve_reranked
+from src.retrieval.retriever import Backend, MetadataFilter, retrieve_colpali, retrieve_reranked
 from src.services.genai_client import get_client
 
 Pipeline = Literal["text", "colpali"]
@@ -179,7 +179,11 @@ def generate_answer(query: str, context_docs: list[Document]) -> str:
 
 @observe(name="rag_query")
 def answer_query(
-    query: str, backend: Backend = "faiss", k: int = 4, pipeline: Pipeline = "text"
+    query: str,
+    backend: Backend = "faiss",
+    k: int = 4,
+    pipeline: Pipeline = "text",
+    metadata_filter: Optional[MetadataFilter] = None,
 ) -> tuple[list[Document], Iterator[str]]:
     """Single traced entry point: retrieval and generation nest under one Langfuse trace.
 
@@ -187,9 +191,11 @@ def answer_query(
     "text" uses the strongest chunk pipeline (hybrid + cross-encoder reranking);
     "colpali" retrieves whole pages by late interaction and sends their images
     to the model (backend is ignored - the page collection is Qdrant-only).
+    metadata_filter only applies to "text" - the ColPali collection has no
+    content_type to filter on, every point is a whole page.
     """
     if pipeline == "colpali":
         context_docs = retrieve_colpali(query, k=k)
     else:
-        context_docs = retrieve_reranked(query, backend=backend, k=k)
+        context_docs = retrieve_reranked(query, backend=backend, k=k, metadata_filter=metadata_filter)
     return context_docs, stream_answer(query, context_docs)

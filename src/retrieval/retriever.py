@@ -46,6 +46,22 @@ def _load_bm25_retriever() -> BM25Retriever:
     return BM25Retriever.from_documents(load_chunks(), preprocess_func=_bm25_tokenise)
 
 
+def _bm25_retriever_for(metadata_filter: Optional[MetadataFilter]) -> BM25Retriever:
+    """BM25Retriever has no built-in metadata filter, so a filtered request builds
+    a fresh index over the matching chunk subset rather than reusing the cached
+    full-corpus one - cheap at this corpus size, and keeps the common unfiltered
+    path on the cached retriever.
+    """
+    if metadata_filter is None:
+        return _load_bm25_retriever()
+    chunks = [
+        chunk
+        for chunk in load_chunks()
+        if all(chunk.metadata.get(key) == value for key, value in metadata_filter.items())
+    ]
+    return BM25Retriever.from_documents(chunks, preprocess_func=_bm25_tokenise)
+
+
 def _to_qdrant_filter(metadata_filter: MetadataFilter) -> qdrant_models.Filter:
     return qdrant_models.Filter(
         must=[
@@ -84,11 +100,23 @@ def retrieve_hybrid(
     backend: Backend = "faiss",
     k: int = 4,
     dense_weight: float = 0.5,
+    metadata_filter: Optional[MetadataFilter] = None,
 ) -> list[Document]:
     """Combine dense similarity search with BM25 lexical search via reciprocal rank fusion."""
-    dense_retriever = _load_index(backend).as_retriever(search_kwargs={"k": k})
+    index = _load_index(backend)
+    search_kwargs: dict = {"k": k}
+    if metadata_filter is not None:
+        if backend == "faiss":
+            # Same fetch_k caveat as retrieve(): FAISS filters post-search, so
+            # fetch_k must cover the whole index or a match outside the default
+            # top-20 window is silently dropped.
+            search_kwargs["filter"] = metadata_filter
+            search_kwargs["fetch_k"] = index.index.ntotal
+        else:
+            search_kwargs["filter"] = _to_qdrant_filter(metadata_filter)
+    dense_retriever = index.as_retriever(search_kwargs=search_kwargs)
 
-    bm25_retriever = _load_bm25_retriever()
+    bm25_retriever = _bm25_retriever_for(metadata_filter)
     bm25_retriever.k = k
 
     ensemble = EnsembleRetriever(
@@ -148,10 +176,18 @@ def retrieve_colpali(query: str, k: int = 4) -> list[Document]:
     ]
 
 
+def _matches_filter(chunk: Document, metadata_filter: Optional[MetadataFilter]) -> bool:
+    if metadata_filter is None:
+        return True
+    return all(chunk.metadata.get(key) == value for key, value in metadata_filter.items())
+
+
 _TABLE_REFERENCE_PATTERN = re.compile(r"\btable\s+(\d+)\b", re.IGNORECASE)
 
 
-def _structural_table_candidates(query: str) -> list[Document]:
+def _structural_table_candidates(
+    query: str, metadata_filter: Optional[MetadataFilter] = None
+) -> list[Document]:
     """Chunks whose section names a table number the query references directly.
 
     "Fetch table 2 data" is a lookup by document structure, not by content -
@@ -168,13 +204,16 @@ def _structural_table_candidates(query: str) -> list[Document]:
         chunk
         for chunk in load_chunks()
         if str(chunk.metadata.get("section", "")).lower().startswith(prefixes)
+        and _matches_filter(chunk, metadata_filter)
     ]
 
 
 _PAGE_REFERENCE_PATTERN = re.compile(r"\bpage\s+(\d+)\b", re.IGNORECASE)
 
 
-def _structural_page_candidates(query: str) -> list[Document]:
+def _structural_page_candidates(
+    query: str, metadata_filter: Optional[MetadataFilter] = None
+) -> list[Document]:
     """Chunks covering a printed page number the query references directly.
 
     "Get the data from page 58" is a lookup by document structure, and page
@@ -196,6 +235,7 @@ def _structural_page_candidates(query: str) -> list[Document]:
             chunk.metadata["start_page"] <= page <= chunk.metadata["end_page"]
             for page in raw_pages
         )
+        and _matches_filter(chunk, metadata_filter)
     ]
 
 
@@ -206,6 +246,7 @@ def retrieve_reranked(
     k: int = 4,
     candidate_k: int = 10,
     dense_weight: float = 0.5,
+    metadata_filter: Optional[MetadataFilter] = None,
 ) -> list[Document]:
     """Cast a wider hybrid net, then use a cross-encoder to re-rank down to top-k."""
     # Page references are handled before anything else: unlike table candidates
@@ -214,15 +255,23 @@ def retrieve_reranked(
     # unrelated matches. Reranking them among themselves keeps the answer on the
     # requested page, ordered by relevance to the rest of the query; the normal
     # pipeline tops up only when the page yields fewer than k chunks.
-    page_results = reranker.rerank(query, _structural_page_candidates(query), top_n=k)
+    page_results = reranker.rerank(
+        query, _structural_page_candidates(query, metadata_filter), top_n=k
+    )
     if len(page_results) >= k:
         return page_results
 
-    candidates = retrieve_hybrid(query, backend=backend, k=candidate_k, dense_weight=dense_weight)
+    candidates = retrieve_hybrid(
+        query,
+        backend=backend,
+        k=candidate_k,
+        dense_weight=dense_weight,
+        metadata_filter=metadata_filter,
+    )
     seen = {candidate.page_content for candidate in candidates}
     candidates += [
         extra
-        for extra in _structural_table_candidates(query)
+        for extra in _structural_table_candidates(query, metadata_filter)
         if extra.page_content not in seen
     ]
     seen_pages = {doc.page_content for doc in page_results}
