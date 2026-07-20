@@ -12,7 +12,7 @@
 
 Cross-encoder model used: cross-encoder/ms-marco-MiniLM-L-6-v2 for re-ranking.
 
-## Business questions and use cases (2 min)
+## Business questions and use cases
 
 - Problem: manual report analysis is slow and expert-bound - this speeds it up.
 - Friction cut: from reading 147 pages to asking questions with cited answers.
