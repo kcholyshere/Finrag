@@ -3,6 +3,7 @@ python-dotenv==1.2.2
 docling==2.108.0
 docling-core==2.85.0
 google-genai==2.10.0
+httpx==0.28.1
 faiss-cpu==1.14.3
 qdrant-client==1.18.0
 langchain-core==1.4.8
