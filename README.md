@@ -21,6 +21,8 @@ they can be judged on the same 200-question set.
 See `ARCHITECTURE.md` for the module-level design and data flow, and
 `reports/` for the full evaluation write-ups.
 
+![Finrag Streamlit UI - question, answer, sources, and expandable retrieved snippets](references/Screenshot.png)
+
 ## Capabilities
 
 - Docling-based parsing of text, tables, and images from the source PDF, with
@@ -214,7 +216,7 @@ checked in so the evaluation harness has a fixed question set to run against.
 ## Further reading
 
 - `ARCHITECTURE.md` - module map, data flow diagrams, and deployment
-- `agent_docs/decisions.md` - architecture decision records (ADRs) for the
+- `decisions.md` - architecture decision records (ADRs) for the
   non-obvious choices (parsing library, embedding model, table/image
   retrievability fixes, ColPali design)
 - `reports/eval_results_comparison.md` - the full eval ladder and Phase 6

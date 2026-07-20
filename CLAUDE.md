@@ -22,7 +22,7 @@ Financial reports mix narrative text, dense tables, and visual charts - a naive 
 3. Phase 2 - Evaluation (`src/evaluation/`): a 200-row eval set (`data/processed/eval_dataset.csv` - 34 curated rows plus synthetically generated/critique-filtered rows, built by `python -m src.evaluation.synthetic_qa`) evaluated in two layers via `python -m src.evaluation.run_eval`:
    - Per-step diagnostics (`src/evaluation/diagnostics.py`): parsing/chunking coverage (fuzzy match), retrieval Hit Rate@k/MRR plus RAGAS `context_precision`/`context_recall`, and RAGAS `faithfulness`/`answer_relevancy` for generation.
    - End-to-end outcome: RAGAS `answer_correctness`, RAGAS's own LLM-graded metrics serving as the LLM-as-judge experiment.
-   - RAGAS runs against Vertex AI Gemini via `src/evaluation/ragas_compat.py` (see ADR-0006 in `agent_docs/decisions.md` for the RAGAS/langchain-community compatibility shim this needs).
+   - RAGAS runs against Vertex AI Gemini via `src/evaluation/ragas_compat.py` (see ADR-0006 in `decisions.md` for the RAGAS/langchain-community compatibility shim this needs).
    - Each run is saved as a settings-tagged JSON under `data/processed/eval_runs/` so later phases can be compared against this baseline.
 4. Phase 3 - Hybrid search & re-ranking (`src/retrieval/`): `content_type` metadata filtering, BM25 + dense via `EnsembleRetriever` (`retrieve_hybrid`), cross-encoder re-ranking (`retrieve_reranked`, the default pipeline in `answer.py`).
 5. Phase 5.1 - Tables: Docling table extraction (`parse.py::extract_table_records`), one chunk per table (`content_type: "table"`) headed by a cached Gemini summary (`enrich.py::summarise_tables`, `data/interim/table_summaries.json`) because bare markdown tables match queries poorly.

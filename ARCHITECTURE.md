@@ -2,7 +2,7 @@
 
 Finrag: a multimodal Retrieval Augmented Generation (RAG) system that answers questions about the
 IFC Annual Report 2024 (Financials). The system has grown across six phases (see
-`agent_docs/decisions.md` for the reasoning behind each choice) into two independently retrievable
+`decisions.md` for the reasoning behind each choice) into two independently retrievable
 pipelines that share one generation, UI, and evaluation layer:
 
 - The chunk pipeline (Phases 1-5): Docling parses the PDF into text, tables, and images; tables and
@@ -354,7 +354,7 @@ app container, which never loads the ColQwen2 model.
 The harness sits beside ingestion/serving rather than in their request path - it runs the *existing*
 pipeline over a fixed question set and scores it in two layers: per-step diagnostics (is each stage
 doing its job?) and end-to-end outcome (is the final answer any good?). See
-`agent_docs/decisions.md` (ADR-0006) for why the two layers exist and why the RAGAS/Vertex shim below
+`decisions.md` (ADR-0006) for why the two layers exist and why the RAGAS/Vertex shim below
 is necessary.
 
 ```mermaid
